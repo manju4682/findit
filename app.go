@@ -15,7 +15,9 @@ import (
 	rt "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/findit/findit/internal/carve"
+	"github.com/findit/findit/internal/config"
 	"github.com/findit/findit/internal/device"
+	"github.com/findit/findit/internal/diagnosis"
 	"github.com/findit/findit/internal/jobs"
 	"github.com/findit/findit/internal/model"
 	"github.com/findit/findit/internal/recovery"
@@ -49,6 +51,34 @@ func (a *App) startup(ctx context.Context) { a.ctx = ctx }
 
 // SupportedRawTypes lists the file extensions the raw carver understands.
 func (a *App) SupportedRawTypes() []string { return carve.Supported() }
+
+// PartitionDTO describes one detected partition/volume for the partition picker.
+type PartitionDTO struct {
+	Offset int64  `json:"offset"`
+	FSType string `json:"fsType"`
+	Label  string `json:"label"`
+	Size   int64  `json:"size"`
+}
+
+// DetectPartitions does a fast partition-table read of a disk image (no full
+// content scan) so the frontend can offer an optional partition picker. It
+// returns an empty list on any error, so callers can silently fall back to
+// "scan everything".
+func (a *App) DetectPartitions(imagePath string) ([]PartitionDTO, error) {
+	if imagePath == "" {
+		return nil, nil
+	}
+	src, err := storage.OpenImage(imagePath)
+	if err != nil {
+		return nil, nil
+	}
+	defer src.Close()
+	var out []PartitionDTO
+	for _, p := range diagnosis.Partitions(src) {
+		out = append(out, PartitionDTO{Offset: p.Offset, FSType: string(p.Type), Label: p.Label, Size: p.Size})
+	}
+	return out, nil
+}
 
 // ListDevices returns physical storage devices and caches them so a later
 // clone/scan can resolve a device by ID.
@@ -131,7 +161,7 @@ func (a *App) StartClone(deviceID, destPath string) error {
 // pollCloneProgress emits progress by watching the growing image file until the
 // clone finishes.
 func (a *App) pollCloneProgress(destPath string, total int64, done <-chan struct{}) {
-	ticker := time.NewTicker(500 * time.Millisecond)
+	ticker := time.NewTicker(config.Get().Clone.PollInterval())
 	defer ticker.Stop()
 	for {
 		select {
@@ -201,6 +231,12 @@ func (a *App) RevealInFinder(path string) error {
 	return cmd.Start()
 }
 
+// OpenFullDiskAccessSettings opens the macOS Full Disk Access privacy pane so
+// the user can allow FindIt to read raw disks.
+func (a *App) OpenFullDiskAccessSettings() error {
+	return exec.Command("open", "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles").Start()
+}
+
 // ScanDone is the payload of the "scan:done" event.
 type ScanDone struct {
 	Diagnosis *model.Diagnosis `json:"diagnosis"`
@@ -214,18 +250,21 @@ type ScanDone struct {
 //	scan:source   RecoverySource
 //	scan:done     ScanDone
 //	scan:error    string
-func (a *App) StartScan(path string, filesystems []string, raw bool, rawExts []string) error {
+//
+// partitionOffsets optionally restricts filesystem enumeration to the given
+// partition byte offsets (empty means scan every detected partition).
+func (a *App) StartScan(path string, filesystems []string, raw bool, rawExts []string, partitionOffsets []int64) error {
 	src, err := recovery.OpenImage(path)
 	if err != nil {
 		return err
 	}
-	a.runScan(src, filesystems, raw, rawExts)
+	a.runScan(src, filesystems, raw, rawExts, partitionOffsets)
 	return nil
 }
 
 // StartScanDevice scans a device directly (image-first is preferred; this backs
 // the "skip clone" path). Reading a raw device may require elevated privileges.
-func (a *App) StartScanDevice(deviceID string, filesystems []string, raw bool, rawExts []string) error {
+func (a *App) StartScanDevice(deviceID string, filesystems []string, raw bool, rawExts []string, partitionOffsets []int64) error {
 	a.mu.Lock()
 	dev, ok := a.devices[deviceID]
 	a.mu.Unlock()
@@ -236,11 +275,11 @@ func (a *App) StartScanDevice(deviceID string, filesystems []string, raw bool, r
 	if err != nil {
 		return err
 	}
-	a.runScan(src, filesystems, raw, rawExts)
+	a.runScan(src, filesystems, raw, rawExts, partitionOffsets)
 	return nil
 }
 
-func (a *App) runScan(src storage.Source, filesystems []string, raw bool, rawExts []string) {
+func (a *App) runScan(src storage.Source, filesystems []string, raw bool, rawExts []string, partitionOffsets []int64) {
 	a.mu.Lock()
 	if a.src != nil {
 		a.src.Close()
@@ -252,7 +291,7 @@ func (a *App) runScan(src storage.Source, filesystems []string, raw bool, rawExt
 	a.filesByID = map[string]fileRef{}
 	a.mu.Unlock()
 
-	req := model.ScanRequest{Raw: raw, RawExtensions: rawExts}
+	req := model.ScanRequest{Raw: raw, RawExtensions: rawExts, PartitionOffsets: partitionOffsets}
 	for _, f := range filesystems {
 		req.Filesystems = append(req.Filesystems, model.FSType(f))
 	}
@@ -327,7 +366,7 @@ func (a *App) Preview(sourceID, fileID string) (PreviewDTO, error) {
 	if src == nil || !okS || !okF {
 		return PreviewDTO{}, fmt.Errorf("preview: file not found")
 	}
-	p := recovery.Preview(a.ctx, src, source, ref.file, 256)
+	p := recovery.Preview(a.ctx, src, source, ref.file, config.Get().Preview.MaxDimension)
 	dto := PreviewDTO{Kind: string(p.Kind), Status: string(p.Status), Note: p.Note, Width: p.Width, Height: p.Height}
 	if len(p.Thumbnail) > 0 {
 		dto.ThumbnailDataURL = "data:image/png;base64," + base64.StdEncoding.EncodeToString(p.Thumbnail)

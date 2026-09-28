@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/findit/findit/internal/config"
 	"github.com/findit/findit/internal/model"
 	"github.com/findit/findit/internal/storage"
 )
@@ -24,13 +25,33 @@ func Diagnose(path string) (*model.Diagnosis, error) {
 // current filesystem, previous/underlying filesystem candidates, a raw media
 // summary, and a plain-English narrative.
 func DiagnoseSource(src storage.Source) (*model.Diagnosis, error) {
-	head := make([]byte, sectorSize)
+	// Use the source's real sector size (512 for images, the device's actual
+	// block size otherwise) so partition offsets are correct on 4Kn drives too.
+	bs := sectorSizeOf(src)
+
+	head := make([]byte, bs)
 	if _, err := src.ReadAt(head, 0); err != nil {
 		return nil, fmt.Errorf("reading boot sector: %w", err)
 	}
 	curType, curLabel := identifyBoot(head)
+	current := model.FSIdentity{Type: curType, Offset: 0, Size: src.Size(), Label: curLabel}
 
-	res, err := scan(storage.Reader(src), curType)
+	// Only look for partitions when offset 0 is not itself a filesystem — a real
+	// FS boot sector also ends in 0x55AA and would be misread as an MBR.
+	var present []model.FSIdentity
+	if current.Type == model.FSUnknown {
+		present = partitionFilesystems(src, bs)
+		if len(present) > 0 {
+			current = present[0]
+		}
+	}
+
+	presentTypes := map[model.FSType]bool{current.Type: true}
+	for _, p := range present {
+		presentTypes[p.Type] = true
+	}
+
+	res, err := scan(storage.Reader(src), current.Type)
 	if err != nil {
 		return nil, err
 	}
@@ -39,17 +60,60 @@ func DiagnoseSource(src storage.Source) (*model.Diagnosis, error) {
 	d := &model.Diagnosis{
 		ImagePath:  src.Name(),
 		ImageSize:  src.Size(),
-		Current:    model.FSIdentity{Type: curType, Offset: 0, Label: curLabel},
-		Candidates: buildCandidates(res, curType, carve),
+		Current:    current,
+		Present:    present,
+		Candidates: buildCandidates(res, presentTypes, carve),
 		Carve:      carve,
 	}
 	d.Narrative = narrate(d)
 	return d, nil
 }
 
-// buildCandidates converts raw evidence into scored, deduplicated filesystem
-// candidates, excluding the current filesystem.
-func buildCandidates(res *scanResult, curType model.FSType, carve model.CarveSummary) []model.FilesystemCandidate {
+// Partitions returns the filesystem-bearing partitions on the source without a
+// full content scan — fast enough to drive an interactive partition picker.
+// When the drive holds a single whole-disk filesystem (no partition table), it
+// returns that one filesystem at offset 0.
+func Partitions(src storage.Source) []model.FSIdentity {
+	bs := sectorSizeOf(src)
+	head := make([]byte, bs)
+	if _, err := src.ReadAt(head, 0); err != nil {
+		return nil
+	}
+	if t, label := identifyBoot(head); t != model.FSUnknown {
+		return []model.FSIdentity{{Type: t, Offset: 0, Size: src.Size(), Label: label}}
+	}
+	return partitionFilesystems(src, bs)
+}
+
+// partitionFilesystems identifies the filesystem in each partition of a
+// partitioned drive, at its real byte offset.
+func partitionFilesystems(src storage.Source, bs int) []model.FSIdentity {
+	var present []model.FSIdentity
+	sec := make([]byte, bs)
+	for _, p := range parsePartitions(src, int64(bs)) {
+		if _, err := src.ReadAt(sec, p.offset); err != nil {
+			continue
+		}
+		if t, label := identifyBoot(sec); t != model.FSUnknown {
+			present = append(present, model.FSIdentity{Type: t, Offset: p.offset, Size: p.size, Label: label})
+		}
+	}
+	return present
+}
+
+// sectorSizeOf returns the source's logical sector size, falling back to the
+// 512-byte default when the source can't report one.
+func sectorSizeOf(src storage.Source) int {
+	if bs := src.SectorSize(); bs > 0 {
+		return bs
+	}
+	return sectorSize
+}
+
+// buildCandidates converts raw evidence into scored, deduplicated previous /
+// underlying filesystem candidates, excluding filesystems already present in a
+// partition.
+func buildCandidates(res *scanResult, presentTypes map[model.FSType]bool, carve model.CarveSummary) []model.FilesystemCandidate {
 	byType := map[model.FSType]*model.FilesystemCandidate{}
 	get := func(t model.FSType) *model.FilesystemCandidate {
 		if c := byType[t]; c != nil {
@@ -61,6 +125,9 @@ func buildCandidates(res *scanResult, curType model.FSType, carve model.CarveSum
 	}
 
 	for _, e := range res.boot {
+		if presentTypes[e.FSType] {
+			continue
+		}
 		c := get(e.FSType)
 		c.Evidence = append(c.Evidence, e)
 		if c.Offset == 0 {
@@ -71,7 +138,7 @@ func buildCandidates(res *scanResult, curType model.FSType, carve model.CarveSum
 		}
 	}
 	for t, offs := range res.typeHits {
-		if t == curType || len(offs) == 0 {
+		if presentTypes[t] || len(offs) == 0 {
 			continue
 		}
 		c := get(t)
@@ -80,7 +147,7 @@ func buildCandidates(res *scanResult, curType model.FSType, carve model.CarveSum
 			Detail: fmt.Sprintf("%d occurrence(s)", len(offs)),
 		})
 	}
-	if len(res.mftHits) > 0 {
+	if len(res.mftHits) > 0 && !presentTypes[model.FSNTFS] {
 		c := get(model.FSNTFS)
 		c.Evidence = append(c.Evidence, model.Evidence{
 			Kind: "mft-record", FSType: model.FSNTFS, Offset: res.mftHits[0],
@@ -91,7 +158,7 @@ func buildCandidates(res *scanResult, curType model.FSType, carve model.CarveSum
 	mediaPresent := carve.Photos()+carve.Videos() > 0
 	var out []model.FilesystemCandidate
 	for t, c := range byType {
-		if t == curType || t == model.FSUnknown {
+		if presentTypes[t] || t == model.FSUnknown {
 			continue
 		}
 		c.Score, c.Confidence = score(c, mediaPresent)
@@ -101,8 +168,13 @@ func buildCandidates(res *scanResult, curType model.FSType, carve model.CarveSum
 	return out
 }
 
-// score weights a candidate's evidence into a 0..100 value and a bucket.
+// scoreMax is the top of the 0..100 evidence scale (a clamp ceiling, not a knob).
+const scoreMax = 100
+
+// score weights a candidate's evidence into a 0..100 value and a bucket, using
+// the tunable weights and cutoffs from the config package.
 func score(c *model.FilesystemCandidate, mediaPresent bool) (int, model.Confidence) {
+	d := config.Get().Diagnosis
 	var s int
 	var hasBoot, hasString, hasMFT bool
 	for _, e := range c.Evidence {
@@ -116,24 +188,24 @@ func score(c *model.FilesystemCandidate, mediaPresent bool) (int, model.Confiden
 		}
 	}
 	if hasBoot {
-		s += 40
+		s += d.ScoreBootSector
 	}
 	if hasString {
-		s += 25
+		s += d.ScoreTypeString
 	}
 	if hasMFT {
-		s += 20
+		s += d.ScoreMFTRecord
 	}
 	if mediaPresent {
-		s += 15
+		s += d.ScoreMediaBonus
 	}
-	if s > 100 {
-		s = 100
+	if s > scoreMax {
+		s = scoreMax
 	}
 	switch {
-	case s >= 75:
+	case s >= d.ConfHighCutoff:
 		return s, model.ConfHigh
-	case s >= 40:
+	case s >= d.ConfMediumCutoff:
 		return s, model.ConfMedium
 	default:
 		return s, model.ConfLow
@@ -143,27 +215,26 @@ func score(c *model.FilesystemCandidate, mediaPresent bool) (int, model.Confiden
 // narrate turns a Diagnosis into user-facing language (no jargon).
 func narrate(d *model.Diagnosis) string {
 	var b strings.Builder
-	cur := string(d.Current.Type)
-	if d.Current.Type == model.FSUnknown {
-		cur = "an unrecognized format"
+
+	switch {
+	case len(d.Present) > 0:
+		fmt.Fprintf(&b, "This drive has a %s filesystem. ", d.Present[0].Type)
+	case d.Current.Type != model.FSUnknown:
+		fmt.Fprintf(&b, "This drive has a %s filesystem. ", d.Current.Type)
+	default:
+		b.WriteString("This drive's filesystem couldn't be read directly. ")
 	}
-	fmt.Fprintf(&b, "This drive currently appears as %s. ", cur)
 
 	if len(d.Candidates) > 0 {
 		top := d.Candidates[0]
 		fmt.Fprintf(&b,
-			"We found signs of an earlier %s filesystem underneath it (confidence: %s). "+
-				"Your previous files appear to still be present. ",
-			top.Type, strings.ToLower(string(top.Confidence)))
-	} else {
-		b.WriteString("We did not detect an earlier filesystem, but we can still look for files by their content. ")
+			"We also found signs of an earlier %s filesystem underneath — your older files may still be recoverable. ",
+			top.Type)
 	}
 
 	photos, videos := d.Carve.Photos(), d.Carve.Videos()
 	if photos+videos > 0 {
-		fmt.Fprintf(&b, "So far we can see about %d photo(s) and %d video(s) that may be recoverable.", photos, videos)
-	} else {
-		b.WriteString("No recoverable photos or videos have been found yet.")
+		fmt.Fprintf(&b, "We can also see about %d photo(s) and %d video(s) by content.", photos, videos)
 	}
-	return b.String()
+	return strings.TrimSpace(b.String())
 }

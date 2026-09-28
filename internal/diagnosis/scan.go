@@ -9,10 +9,24 @@ import (
 	"strings"
 
 	"github.com/findit/findit/internal/bytescan"
+	"github.com/findit/findit/internal/config"
 	"github.com/findit/findit/internal/model"
 )
 
 const sectorSize = 512
+
+// Boot-sector layout offsets, fixed by the FAT/exFAT/NTFS on-disk formats.
+const (
+	bootMinLen    = 90  // shortest slice identifyBoot can inspect
+	oemNameOffset = 3   // exFAT/NTFS OEM/type string starts here
+	oemNameLen    = 8   // ...and is 8 bytes long
+	fatTypeOffset = 82  // FAT32 "FAT32   " type string
+	fatLabelStart = 71  // FAT32 volume label
+	fatLabelEnd   = 82  // ...ends here
+	bootSigOffset = 510 // 2-byte boot signature (0x55 0xAA)
+)
+
+var bootSignature = [2]byte{0x55, 0xAA}
 
 // Boot-sector identity strings, read at fixed offsets within a 512-byte sector.
 var (
@@ -39,16 +53,16 @@ var (
 // identifyBoot inspects a candidate 512-byte boot sector and returns the
 // filesystem it describes, plus a volume label when available.
 func identifyBoot(b []byte) (model.FSType, string) {
-	if len(b) < 90 {
+	if len(b) < bootMinLen {
 		return model.FSUnknown, ""
 	}
 	switch {
-	case bytes.Equal(b[3:11], oemExFAT):
+	case bytes.Equal(b[oemNameOffset:oemNameOffset+oemNameLen], oemExFAT):
 		return model.FSExFAT, ""
-	case bytes.Equal(b[3:11], oemNTFS):
+	case bytes.Equal(b[oemNameOffset:oemNameOffset+oemNameLen], oemNTFS):
 		return model.FSNTFS, ""
-	case bytes.Equal(b[82:90], fatType):
-		return model.FSFAT32, strings.TrimRight(string(b[71:82]), " \x00")
+	case bytes.Equal(b[fatTypeOffset:fatTypeOffset+oemNameLen], fatType):
+		return model.FSFAT32, strings.TrimRight(string(b[fatLabelStart:fatLabelEnd]), " \x00")
 	}
 	return model.FSUnknown, ""
 }
@@ -71,7 +85,7 @@ func scan(r io.Reader, curType model.FSType) (*scanResult, error) {
 	}
 	// overlap must exceed one sector so the aligned boot-sector probe can read a
 	// full 512-byte sector starting anywhere within the owned region.
-	const overlap = 1 << 13
+	overlap := config.Get().Diagnosis.ScanOverlapBytes
 	err := bytescan.Scan(r, overlap, func(win []byte, base int64, safe int) {
 		scanWindow(res, win, safe, base, curType)
 	})
@@ -107,7 +121,7 @@ func scanWindow(res *scanResult, window []byte, end int, base int64, curType mod
 	for a := first; a+sectorSize <= base+int64(end); a += sectorSize {
 		off := int(a - base)
 		b := window[off : off+sectorSize]
-		if b[510] != 0x55 || b[511] != 0xAA {
+		if b[bootSigOffset] != bootSignature[0] || b[bootSigOffset+1] != bootSignature[1] {
 			continue
 		}
 		if t, label := identifyBoot(b); t != model.FSUnknown && t != curType {

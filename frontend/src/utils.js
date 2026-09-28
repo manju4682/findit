@@ -79,22 +79,32 @@ export function folderLabel(name) {
   return name || '/'
 }
 
-function collectFiles(source) {
-  if (!source) return []
-  if (source.kind !== 'filesystem') return source.files || []
-  const out = []
-  const walk = (n) => {
-    if (n.file) out.push(n.file)
-    for (const c of n.children || []) walk(c)
-  }
-  if (source.root) walk(source.root)
-  return out
+// sourceLabel builds a human label for a source, distinguishing partitions of
+// the same filesystem type by their volume label and size (e.g.
+// "NTFS · “Backup” · 120 GB").
+export function sourceLabel(source) {
+  if (!source) return ''
+  if (source.kind !== 'filesystem') return 'Raw files'
+  const parts = [source.fsType || 'Filesystem']
+  if (source.label) parts.push(`“${source.label}”`)
+  if (source.size) parts.push(fmtSize(source.size))
+  return parts.join(' · ')
 }
 
-// sourceSummary counts how many files in a source are fully recoverable.
+// sourceSummary uses the backend counts (O(1)) — no tree walking per render.
 export function sourceSummary(source) {
-  const files = collectFiles(source)
-  let rec = 0
-  for (const f of files) if (f.recoverable) rec++
-  return { total: files.length, recoverable: rec, nameOnly: files.length - rec }
+  const total = source?.fileCount || 0
+  const rec = source?.recoverableCount ?? total
+  return { total, recoverable: rec, nameOnly: total - rec }
+}
+
+// recoverConfidence reflects how much of a source is actually recoverable,
+// rather than how confident we are the filesystem exists.
+export function recoverConfidence(source) {
+  const s = sourceSummary(source)
+  if (!s.total) return null
+  const r = s.recoverable / s.total
+  if (r >= 0.8) return { label: 'High', cls: 'bg-emerald-100 text-emerald-700' }
+  if (r >= 0.4) return { label: 'Medium', cls: 'bg-amber-100 text-amber-700' }
+  return { label: 'Low', cls: 'bg-slate-100 text-slate-600' }
 }

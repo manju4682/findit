@@ -2,11 +2,12 @@
 import { computed } from 'vue'
 import FolderTree from './FolderTree.vue'
 import Hint from './Hint.vue'
+import FileThumb from './FileThumb.vue'
 import {
   store,
   activeSource,
   currentFolders,
-  currentFiles,
+  currentFilesFiltered,
   openFolder,
   goBreadcrumb,
   back,
@@ -27,25 +28,22 @@ import {
   dismissRecover,
 } from '../store'
 import {
-  previewable,
   folderLabel,
   statusInfo,
   statusList,
   sourceSummary,
+  sourceLabel,
+  recoverConfidence,
   fmtSize,
   iconFor,
 } from '../utils'
 
 const src = computed(() => activeSource())
 const folders = computed(() => currentFolders())
-const files = computed(() => currentFiles())
+const files = computed(() => currentFilesFiltered())
 const summary = computed(() => (src.value ? sourceSummary(src.value) : { total: 0, recoverable: 0, nameOnly: 0 }))
+const conf = computed(() => (src.value ? recoverConfidence(src.value) : null))
 const selCount = computed(() => selectedIds().length)
-
-function thumb(file) {
-  const p = store.previews[file.id]
-  return p && p.thumbnailDataUrl ? p.thumbnailDataUrl : ''
-}
 </script>
 
 <template>
@@ -100,19 +98,31 @@ function thumb(file) {
           @click="store.viewMode = m[0]"
         >{{ m[1] }}</button>
       </div>
+
+      <!-- status filter -->
+      <select
+        v-model="store.statusFilter"
+        class="text-xs border rounded-lg px-2 py-1 bg-white text-slate-600"
+        title="Filter files by status"
+      >
+        <option value="all">All files</option>
+        <option value="recoverable">Recoverable only</option>
+        <option value="limited">Limited only</option>
+      </select>
     </div>
 
     <!-- Source summary -->
     <div class="px-4 py-2 border-b bg-slate-50 flex items-center gap-2 text-sm">
       <span class="font-medium text-slate-700">
-        {{ src?.kind === 'filesystem' ? src.fsType + ' filesystem' : 'Raw files' }}
+        {{ sourceLabel(src) }}
       </span>
       <span
-        v-if="src?.confidence"
-        class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 flex items-center gap-1"
+        v-if="conf"
+        class="text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
+        :class="conf.cls"
       >
-        {{ src.confidence }} confidence
-        <Hint text="How sure we are this filesystem really holds your old files, based on the evidence we found." />
+        {{ conf.label }} recoverable
+        <Hint text="Based on how many files in this source actually have recoverable contents." />
       </span>
       <span class="text-slate-400">·</span>
       <span class="text-emerald-600">{{ summary.recoverable }} recoverable</span>
@@ -196,7 +206,7 @@ function thumb(file) {
         v-if="src && src.kind === 'filesystem' && src.root"
         class="w-56 border-r bg-slate-50/70 overflow-auto p-2 shrink-0"
       >
-        <FolderTree :node="src.root" :label="src.fsType + ' filesystem'" />
+        <FolderTree :node="src.root" :label="sourceLabel(src)" />
       </aside>
 
       <!-- Center: contents -->
@@ -235,10 +245,7 @@ function thumb(file) {
               @click.stop
               @change="toggleFile(f.id)"
             />
-            <div class="h-24 w-24 flex items-center justify-center overflow-hidden rounded-lg bg-white ring-1 ring-slate-100">
-              <img v-if="thumb(f)" :src="thumb(f)" class="max-h-24 max-w-full object-contain" />
-              <span v-else class="text-5xl">{{ iconFor(f.ext) }}</span>
-            </div>
+            <FileThumb :file="f" />
             <div class="text-xs text-center truncate w-full mt-1.5" :class="f.deleted ? 'text-slate-400 line-through' : 'text-slate-700'">
               {{ f.name }}
             </div>

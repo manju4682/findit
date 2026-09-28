@@ -125,7 +125,7 @@ func (e *Engine) Enumerate(ctx context.Context) (*model.RecoverySource, error) {
 
 	sourceID := fmt.Sprintf("fs-%s-%d", e.fsType, e.offsetByte)
 	root := &model.Node{Name: "", IsDir: true}
-	var fileCount int
+	var fileCount, recoverable int
 
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	sc.Buffer(make([]byte, 0, 64<<10), 4<<20)
@@ -141,18 +141,22 @@ func (e *Engine) Enumerate(ctx context.Context) (*model.RecoverySource, error) {
 		rf := e.toFile(sourceID, en)
 		insertFile(root, en.path, rf)
 		fileCount++
+		if rf.Recoverable {
+			recoverable++
+		}
 	}
 	if err := sc.Err(); err != nil {
 		return nil, err
 	}
 
 	return &model.RecoverySource{
-		ID:        sourceID,
-		Kind:      model.SourceFilesystem,
-		FSType:    e.fsType,
-		Offset:    e.offsetByte,
-		Root:      root,
-		FileCount: fileCount,
+		ID:               sourceID,
+		Kind:             model.SourceFilesystem,
+		FSType:           e.fsType,
+		Offset:           e.offsetByte,
+		Root:             root,
+		FileCount:        fileCount,
+		RecoverableCount: recoverable,
 	}, nil
 }
 

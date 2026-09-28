@@ -122,3 +122,29 @@ func treeHasFile(n *model.Node, name string) bool {
 	}
 	return false
 }
+
+func TestPlanTargets_PartitionFilter(t *testing.T) {
+	diag := &model.Diagnosis{
+		Current: model.FSIdentity{Type: model.FSNTFS, Offset: 1 << 20},
+		Present: []model.FSIdentity{
+			{Type: model.FSNTFS, Offset: 1 << 20, Size: 100 << 20, Label: "System"},
+			{Type: model.FSExFAT, Offset: 200 << 20, Size: 300 << 20, Label: "Data"},
+		},
+	}
+	want := []model.FSType{model.FSNTFS, model.FSExFAT}
+
+	// No offsets => every present partition is a target.
+	all := planTargets(diag, want, nil)
+	if len(all) != 2 {
+		t.Fatalf("scan-all: got %d targets, want 2: %+v", len(all), all)
+	}
+
+	// Restrict to the exFAT partition's offset only.
+	only := planTargets(diag, want, []int64{200 << 20})
+	if len(only) != 1 || only[0].fsType != model.FSExFAT || only[0].offset != 200<<20 {
+		t.Fatalf("filtered: got %+v, want just exFAT@200MiB", only)
+	}
+	if only[0].size != 300<<20 || only[0].label != "Data" {
+		t.Errorf("target lost size/label: %+v", only[0])
+	}
+}

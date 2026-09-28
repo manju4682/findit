@@ -69,15 +69,17 @@ type Node struct {
 // results. Filesystem sources expose Root (a tree); raw sources expose Files (a
 // flat list).
 type RecoverySource struct {
-	ID         string          `json:"id"`
-	Kind       SourceKind      `json:"kind"`
-	FSType     FSType          `json:"fsType,omitempty"`
-	Offset     int64           `json:"offset"`
-	Label      string          `json:"label,omitempty"`
-	Confidence Confidence      `json:"confidence,omitempty"`
-	Root       *Node           `json:"root,omitempty"`  // filesystem sources
-	Files      []RecoveredFile `json:"files,omitempty"` // raw sources
-	FileCount  int             `json:"fileCount"`
+	ID               string          `json:"id"`
+	Kind             SourceKind      `json:"kind"`
+	FSType           FSType          `json:"fsType,omitempty"`
+	Offset           int64           `json:"offset"`
+	Size             int64           `json:"size,omitempty"` // bytes spanned by the partition/volume
+	Label            string          `json:"label,omitempty"`
+	Confidence       Confidence      `json:"confidence,omitempty"`
+	Root             *Node           `json:"root,omitempty"`  // filesystem sources
+	Files            []RecoveredFile `json:"files,omitempty"` // raw sources
+	FileCount        int             `json:"fileCount"`
+	RecoverableCount int             `json:"recoverableCount"`
 }
 
 // ScanRequest is the user's selection of what to scan. Each chosen filesystem
@@ -86,6 +88,9 @@ type ScanRequest struct {
 	Filesystems   []FSType `json:"filesystems"`             // e.g. [NTFS, exFAT]
 	Raw           bool     `json:"raw"`                     // include a raw carve source
 	RawExtensions []string `json:"rawExtensions,omitempty"` // extensions to carve (user-provided, not hardcoded)
+	// PartitionOffsets restricts filesystem enumeration to the partitions at
+	// these byte offsets (from the partition picker). Empty means scan all.
+	PartitionOffsets []int64 `json:"partitionOffsets,omitempty"`
 }
 
 // ScanResult holds the separate per-source results, in the order requested.

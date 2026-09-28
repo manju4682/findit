@@ -35,6 +35,7 @@ type Evidence struct {
 type FSIdentity struct {
 	Type   FSType `json:"type"`
 	Offset int64  `json:"offset"`
+	Size   int64  `json:"size,omitempty"` // bytes spanned by the partition/volume
 	Label  string `json:"label,omitempty"`
 }
 
@@ -66,6 +67,7 @@ type Diagnosis struct {
 	ImagePath  string                `json:"imagePath"`
 	ImageSize  int64                 `json:"imageSize"`
 	Current    FSIdentity            `json:"current"`
+	Present    []FSIdentity          `json:"present,omitempty"` // filesystems found in partitions
 	Candidates []FilesystemCandidate `json:"candidates"`
 	Carve      CarveSummary          `json:"carve"`
 	Narrative  string                `json:"narrative"`

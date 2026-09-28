@@ -78,12 +78,13 @@ func writeImage(path string, seed int, format string) error {
 	return jpeg.Encode(f, img, &jpeg.Options{Quality: 90})
 }
 
-// writeMP4 emits a minimal but signature-valid MP4: an `ftyp` box followed by a
-// deterministic `mdat` payload. Enough for signature detection and container
-// (ftyp/moov-style) structural checks; not intended to be playable.
+// writeMP4 emits a minimal but signature-valid MP4: an `ftyp` box, a `moov`
+// index box (a nested `mvhd`), then a deterministic `mdat` payload. The moov box
+// is what marks a carved MP4 as playable rather than an unrecoverable fragment.
 func writeMP4(path string, seed int) error {
 	var buf []byte
 	buf = append(buf, box("ftyp", append([]byte("isom\x00\x00\x00\x00"), []byte("isommp41")...))...)
+	buf = append(buf, box("moov", box("mvhd", make([]byte, 100)))...)
 
 	payload := make([]byte, 8192)
 	for i := range payload {

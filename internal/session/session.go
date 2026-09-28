@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/findit/findit/internal/carve"
+	"github.com/findit/findit/internal/config"
 	"github.com/findit/findit/internal/diagnosis"
 	"github.com/findit/findit/internal/engines/tsk"
 	"github.com/findit/findit/internal/jobs"
@@ -58,7 +59,7 @@ func (s *Scan) addSource(rs model.RecoverySource) {
 // until closed, then read Result().
 func StartScan(parent context.Context, src storage.Source, req model.ScanRequest) *Scan {
 	s := &Scan{}
-	s.Job = jobs.Run(parent, 128, func(ctx context.Context, emit func(jobs.Event)) error {
+	s.Job = jobs.Run(parent, config.Get().Scan.EventBufferSize, func(ctx context.Context, emit func(jobs.Event)) error {
 		emit(jobs.Event{Kind: jobs.KindProgress, Phase: "diagnose", Message: "Analyzing the drive…"})
 		diag, err := diagnosis.DiagnoseSource(src)
 		if err != nil {
@@ -81,7 +82,7 @@ func StartScan(parent context.Context, src storage.Source, req model.ScanRequest
 }
 
 func (s *Scan) enumerateFilesystems(ctx context.Context, src storage.Source, diag *model.Diagnosis, req model.ScanRequest, emit func(jobs.Event)) error {
-	for _, tgt := range planTargets(diag, req.Filesystems) {
+	for _, tgt := range planTargets(diag, req.Filesystems, req.PartitionOffsets) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -101,6 +102,7 @@ func (s *Scan) enumerateFilesystems(ctx context.Context, src storage.Source, dia
 			continue
 		}
 		fsSrc.Confidence = tgt.conf
+		fsSrc.Size = tgt.size
 		if tgt.label != "" {
 			fsSrc.Label = tgt.label
 		}
@@ -128,18 +130,27 @@ func (s *Scan) carveRaw(ctx context.Context, src storage.Source, req model.ScanR
 type target struct {
 	fsType model.FSType
 	offset int64
+	size   int64
 	conf   model.Confidence
 	label  string
 }
 
 // planTargets maps the requested filesystem types to concrete offsets using the
 // diagnosis: the current filesystem (offset 0) and any matching previous-FS
-// candidates.
-func planTargets(diag *model.Diagnosis, want []model.FSType) []target {
+// candidates. When offsets is non-empty, present partitions are restricted to
+// those byte offsets (the partition picker); candidates underneath are always
+// kept, since surfacing older files is the whole point.
+func planTargets(diag *model.Diagnosis, want []model.FSType, offsets []int64) []target {
 	wanted := map[model.FSType]bool{}
 	for _, t := range want {
 		wanted[t] = true
 	}
+	chosen := map[int64]bool{}
+	for _, o := range offsets {
+		chosen[o] = true
+	}
+	partitionWanted := func(off int64) bool { return len(chosen) == 0 || chosen[off] }
+
 	var targets []target
 	seen := map[string]bool{}
 	add := func(t target) {
@@ -150,8 +161,14 @@ func planTargets(diag *model.Diagnosis, want []model.FSType) []target {
 		}
 	}
 
-	if wanted[diag.Current.Type] {
-		add(target{fsType: diag.Current.Type, offset: 0, label: diag.Current.Label})
+	// Filesystems present in partitions, at their real offsets.
+	for _, p := range diag.Present {
+		if wanted[p.Type] && partitionWanted(p.Offset) {
+			add(target{fsType: p.Type, offset: p.Offset, size: p.Size, label: p.Label})
+		}
+	}
+	if wanted[diag.Current.Type] && partitionWanted(diag.Current.Offset) {
+		add(target{fsType: diag.Current.Type, offset: diag.Current.Offset, size: diag.Current.Size, label: diag.Current.Label})
 	}
 	for _, c := range diag.Candidates {
 		if wanted[c.Type] {
@@ -162,16 +179,19 @@ func planTargets(diag *model.Diagnosis, want []model.FSType) []target {
 }
 
 // buildRawSource converts carved files into a raw RecoverySource (a flat list).
+// Content-quality scores (0..100) come from config: a structurally valid carve
+// is treated as complete; an invalid one is a low-confidence fragment.
 func buildRawSource(carved []carve.Carved) model.RecoverySource {
+	sc := config.Get().Scan
 	files := make([]model.RecoveredFile, 0, len(carved))
 	for i, c := range carved {
 		status := model.StatusGood
 		if !c.Valid {
 			status = model.StatusRawFragment
 		}
-		content := 100
+		content := sc.RawContentComplete
 		if !c.Valid {
-			content = 40
+			content = sc.RawContentFragment
 		}
 		files = append(files, model.RecoveredFile{
 			ID:          fmt.Sprintf("raw-%d", i),
@@ -185,11 +205,18 @@ func buildRawSource(carved []carve.Carved) model.RecoverySource {
 			Assessment:  model.RecoveryAssessment{Content: content, Status: status},
 		})
 	}
+	recoverable := 0
+	for _, f := range files {
+		if f.Recoverable {
+			recoverable++
+		}
+	}
 	return model.RecoverySource{
-		ID:        "raw",
-		Kind:      model.SourceRaw,
-		Files:     files,
-		FileCount: len(files),
+		ID:               "raw",
+		Kind:             model.SourceRaw,
+		Files:            files,
+		FileCount:        len(files),
+		RecoverableCount: recoverable,
 	}
 }
 

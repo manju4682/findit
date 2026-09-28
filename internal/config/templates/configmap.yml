@@ -1,0 +1,43 @@
+# FindIt tunable defaults.
+#
+# Only genuinely adjustable knobs live here. Values fixed by on-disk formats
+# (partition-table offsets, filesystem magic bytes, sector layout) are NOT in
+# this file — they stay as consts in code, because changing them wouldn't be a
+# tuning choice, it would just be wrong.
+#
+# This document is embedded into the binary at build time, so the shipped .dmg
+# stays fully self-contained: there is no external config file to install, lose,
+# or keep in sync.
+
+diagnosis:
+  # Evidence weights (0..100): how strongly each finding argues for a filesystem.
+  score_boot_sector: 40
+  score_type_string: 25
+  score_mft_record: 20
+  score_media_bonus: 15
+  # Confidence buckets: a score at or above the cutoff earns that label.
+  conf_high_cutoff: 75
+  conf_medium_cutoff: 40
+  # Bytes of overlap kept between streaming windows so a boot sector straddling a
+  # chunk boundary is never missed. Must exceed one sector (512 bytes).
+  scan_overlap_bytes: 8192
+
+scan:
+  # Scan events buffered before a slow UI backpressures the producer.
+  event_buffer_size: 128
+  # Content-quality score (0..100) assigned to carved files.
+  raw_content_complete: 100
+  raw_content_fragment: 40
+
+preview:
+  # Longest edge (pixels) of generated thumbnails.
+  max_dimension: 256
+
+carve:
+  # Largest carved file (bytes) we fully decode to confirm it truly opens.
+  # Files above this are trusted on their structure alone, to bound scan time.
+  max_verify_bytes: 67108864 # 64 MiB
+
+clone:
+  # How often (milliseconds) clone progress is sampled from the growing image.
+  poll_interval_ms: 500

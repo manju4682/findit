@@ -1,11 +1,14 @@
 package carve
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"image/jpeg"
 	"image/png"
 	"io"
+	"os"
 	"testing"
 
 	"github.com/findit/findit/internal/storage"
@@ -97,6 +100,129 @@ func TestScan_OnlyRequestedExtensions(t *testing.T) {
 	if got, _ := Scan(context.Background(), src, nil); got != nil {
 		t.Errorf("empty selection should yield nil, got %d findings", len(got))
 	}
+}
+
+// TestScan_RejectsUndecodableJPEG proves the decode-verify step: a byte sequence
+// that passes JPEG structural checks (SOI, a valid first marker, an SOS, and an
+// EOI) but is not a real image must be reported as a fragment, not recoverable.
+func TestScan_RejectsUndecodableJPEG(t *testing.T) {
+	fake := []byte{0xFF, 0xD8, 0xFF, 0xE0} // SOI + APP0 marker
+	fake = append(fake, bytes.Repeat([]byte{0x00}, 16)...)
+	fake = append(fake, 0xFF, 0xDA) // SOS
+	fake = append(fake, bytes.Repeat([]byte{0x11, 0x22, 0x33}, 64)...)
+	fake = append(fake, 0xFF, 0xD9) // EOI
+
+	src := memSource(t, fake)
+	carved, err := Scan(context.Background(), src, []string{"jpg"})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(carved) != 1 {
+		t.Fatalf("got %d findings, want exactly 1", len(carved))
+	}
+	if carved[0].Valid {
+		t.Error("undecodable JPEG marked Valid; decode-verify should reject it")
+	}
+}
+
+// TestScan_VerifiesZIP proves the verify step generalizes beyond images: a real
+// archive is recoverable, but one whose central directory is corrupt is a
+// fragment even though its PK signatures survived.
+func TestScan_VerifiesZIP(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create("hello.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("hello findit")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	good := buf.Bytes()
+
+	carved, err := Scan(context.Background(), memSource(t, good), []string{"zip"})
+	if err != nil {
+		t.Fatalf("Scan(good): %v", err)
+	}
+	if len(carved) != 1 || !carved[0].Valid {
+		t.Fatalf("real zip should be one Valid finding, got %+v", carved)
+	}
+
+	// Break the central-directory file-header signature (PK\x01\x02) so the index
+	// no longer parses, while the local-header and EOCD signatures still match.
+	bad := append([]byte(nil), good...)
+	cd := bytes.Index(bad, []byte{0x50, 0x4B, 0x01, 0x02})
+	if cd < 0 {
+		t.Fatal("test zip has no central-directory header")
+	}
+	bad[cd] = 0x00
+	carved, err = Scan(context.Background(), memSource(t, bad), []string{"zip"})
+	if err != nil {
+		t.Fatalf("Scan(bad): %v", err)
+	}
+	if len(carved) != 1 {
+		t.Fatalf("got %d findings, want exactly 1", len(carved))
+	}
+	if carved[0].Valid {
+		t.Error("zip with a corrupt central directory marked Valid; verify should reject it")
+	}
+}
+
+// mp4Box builds one ISO-BMFF box: 4-byte big-endian size, 4-byte type, payload.
+func mp4Box(typ string, payload []byte) []byte {
+	out := make([]byte, 8+len(payload))
+	binary.BigEndian.PutUint32(out[0:4], uint32(8+len(payload)))
+	copy(out[4:8], typ)
+	copy(out[8:], payload)
+	return out
+}
+
+// TestScan_RequiresMoovForMP4 proves an MP4 is only recoverable when it carries a
+// moov index box: ftyp+mdat alone (a common truncated/fragmented capture) is a
+// fragment, while ftyp+moov+mdat verifies.
+func TestScan_RequiresMoovForMP4(t *testing.T) {
+	mdat := mp4Box("mdat", bytes.Repeat([]byte{0x42}, 4096))
+	ftyp := mp4Box("ftyp", []byte("isom\x00\x00\x00\x00isommp41"))
+	moov := mp4Box("moov", mp4Box("mvhd", make([]byte, 100)))
+
+	noMoov, err := Scan(context.Background(), memSource(t, append(ftyp, mdat...)), []string{"mp4"})
+	if err != nil {
+		t.Fatalf("Scan(no moov): %v", err)
+	}
+	if len(noMoov) != 1 || noMoov[0].Valid {
+		t.Fatalf("ftyp+mdat should be one fragment (Valid=false), got %+v", noMoov)
+	}
+
+	full := append(append(append([]byte(nil), ftyp...), moov...), mdat...)
+	withMoov, err := Scan(context.Background(), memSource(t, full), []string{"mp4"})
+	if err != nil {
+		t.Fatalf("Scan(moov): %v", err)
+	}
+	if len(withMoov) != 1 || !withMoov[0].Valid {
+		t.Fatalf("ftyp+moov+mdat should be one Valid finding, got %+v", withMoov)
+	}
+}
+
+// memSource writes bytes to a temp image and opens it as a read-only Source.
+func memSource(t *testing.T, b []byte) storage.Source {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "carve-*.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write(b); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	src, err := storage.OpenImage(f.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = src.Close() })
+	return src
 }
 
 func TestSupported(t *testing.T) {

@@ -9,13 +9,15 @@ import {
   StartScan,
   StartScanDevice,
   StartClone,
+  DetectPartitions,
   Preview,
   Recover,
   RevealInFinder,
+  OpenFullDiskAccessSettings,
   SupportedRawTypes,
 } from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
-import { previewable, folderLabel } from './utils'
+import { folderLabel, sourceLabel } from './utils'
 
 export const store = reactive({
   step: 'source', // source | clone | scan | scanning | results
@@ -30,7 +32,7 @@ export const store = reactive({
 
   // clone
   cloning: false,
-  cloneLog: [],
+  cloneStatus: '',
   clonePct: 0,
 
   // scan options
@@ -38,6 +40,11 @@ export const store = reactive({
   filesystems: { NTFS: true, exFAT: true, FAT32: true },
   rawEnabled: true,
   rawSelected: {},
+
+  // partition picker (advanced, optional)
+  partitions: [], // [{ offset, fsType, label, size }]
+  selectedPartitions: {}, // offset(string) -> bool
+  partitionsExpanded: false,
 
   // scanning
   progress: [],
@@ -52,6 +59,7 @@ export const store = reactive({
   histIndex: -1,
   selected: {}, // sourceId -> { fileId: true }
   viewMode: 'grid', // grid | list | details
+  statusFilter: 'all', // all | recoverable | limited
   previews: {}, // fileId -> PreviewDTO
   selectedFile: null,
 
@@ -124,6 +132,7 @@ export async function chooseImage() {
     store.imagePath = p
     store.sourceKind = 'image'
     store.step = 'scan'
+    detectPartitions()
   }
 }
 
@@ -138,7 +147,7 @@ export async function startClone() {
   const dest = await SelectSaveImagePath(def)
   if (!dest) return
   store.cloning = true
-  store.cloneLog = []
+  store.cloneStatus = ''
   store.error = ''
   try {
     await StartClone(dev.id, dest)
@@ -159,6 +168,32 @@ export const selectedFilesystems = () =>
 export const selectedRawTypes = () =>
   Object.keys(store.rawSelected).filter((k) => store.rawSelected[k])
 
+// detectPartitions does a fast partition-table read of the chosen image so the
+// user can optionally narrow the scan. It's best-effort: on any failure the
+// picker simply stays hidden and we scan everything (the safe default). Only
+// images are probed — scanning a device directly always scans all partitions.
+export async function detectPartitions() {
+  store.partitions = []
+  for (const k of Object.keys(store.selectedPartitions)) delete store.selectedPartitions[k]
+  store.partitionsExpanded = false
+  if (!store.imagePath) return
+  try {
+    const parts = (await DetectPartitions(store.imagePath)) || []
+    store.partitions = parts
+    for (const p of parts) store.selectedPartitions[String(p.offset)] = true
+  } catch (e) {
+    /* picker is optional */
+  }
+}
+
+// scanPartitionOffsets returns the offsets to scan, or [] to scan everything.
+// We only send a narrowed list when the user actually deselected some.
+export function scanPartitionOffsets() {
+  const selected = store.partitions.filter((p) => store.selectedPartitions[String(p.offset)])
+  if (!selected.length || selected.length === store.partitions.length) return []
+  return selected.map((p) => p.offset)
+}
+
 export async function startScan() {
   store.error = ''
   store.progress = []
@@ -175,9 +210,9 @@ export async function startScan() {
   const exts = raw ? selectedRawTypes() : []
   try {
     if (store.sourceKind === 'image' || store.imagePath) {
-      await StartScan(store.imagePath, fs, raw, exts)
+      await StartScan(store.imagePath, fs, raw, exts, scanPartitionOffsets())
     } else {
-      await StartScanDevice(store.selectedDeviceId, fs, raw, exts)
+      await StartScanDevice(store.selectedDeviceId, fs, raw, exts, [])
     }
   } catch (e) {
     store.error = String(e)
@@ -205,13 +240,12 @@ function applyFolder(node) {
   if (s && s.kind === 'filesystem' && s.root) {
     const path = findPath(s.root, node || s.root) || [s.root]
     store.breadcrumb = path.map((n, i) => ({
-      name: i === 0 ? `${s.fsType} filesystem` : folderLabel(n.name),
+      name: i === 0 ? sourceLabel(s) : folderLabel(n.name),
       node: n,
     }))
   } else {
     store.breadcrumb = [{ name: 'Raw files', node: null }]
   }
-  loadCurrentPreviews()
 }
 
 export function openFolder(node) {
@@ -285,9 +319,12 @@ export async function loadPreview(file) {
   }
 }
 
-async function loadCurrentPreviews() {
-  const files = currentFiles().filter((f) => previewable(f.ext)).slice(0, 80)
-  for (const f of files) loadPreview(f)
+// currentFilesFiltered applies the status filter to the current folder's files.
+export function currentFilesFiltered() {
+  const files = currentFiles()
+  if (store.statusFilter === 'recoverable') return files.filter((f) => f.recoverable)
+  if (store.statusFilter === 'limited') return files.filter((f) => !f.recoverable)
+  return files
 }
 
 export async function openFile(file) {
@@ -334,11 +371,21 @@ export async function openDest() {
   }
 }
 
+export async function openFullDiskAccess() {
+  try {
+    await OpenFullDiskAccessSettings()
+  } catch (e) {
+    /* ignore */
+  }
+}
+
 export function reset() {
   store.step = 'source'
   store.sourceKind = ''
   store.selectedDeviceId = ''
   store.imagePath = ''
+  store.partitions = []
+  store.partitionsExpanded = false
   store.sources = []
   store.diagnosis = null
   store.activeSourceId = ''
@@ -380,7 +427,7 @@ export async function initStore() {
 
   EventsOn('clone:progress', (e) => {
     if (e && e.message) {
-      store.cloneLog.push(e.message)
+      store.cloneStatus = e.message
       if (e.total > 0) store.clonePct = Math.min(100, Math.round((e.done / e.total) * 100))
     }
   })
@@ -390,6 +437,7 @@ export async function initStore() {
     store.imagePath = e?.path || ''
     store.sourceKind = 'image'
     store.step = 'scan'
+    detectPartitions()
   })
   EventsOn('clone:error', (msg) => {
     store.cloning = false

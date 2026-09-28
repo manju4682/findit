@@ -86,7 +86,8 @@ func kindFor(ext string) Kind {
 func imageFromBytes(data []byte, maxDim int) *Preview {
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		return &Preview{Kind: KindImage, Status: model.StatusPartial, Note: "image did not decode fully"}
+		return &Preview{Kind: KindImage, Status: model.StatusRawFragment,
+			Note: "This looks like an image but is too incomplete to open — likely a fragment or partially overwritten."}
 	}
 	thumb := scaleDown(img, maxDim)
 	var buf bytes.Buffer
@@ -105,8 +106,8 @@ func imageFromBytes(data []byte, maxDim int) *Preview {
 
 func videoFromBytes(ctx context.Context, ext string, data []byte, maxDim int) *Preview {
 	status := model.StatusUncertain
-	if len(data) >= 8 && string(data[4:8]) == "ftyp" {
-		status = model.StatusGood // container structure looks valid
+	if len(data) >= 8 && string(data[4:8]) == "ftyp" && bytes.Contains(data, []byte("moov")) {
+		status = model.StatusGood // has the ftyp container and a moov index
 	}
 	p := &Preview{Kind: KindVideo, Status: status}
 

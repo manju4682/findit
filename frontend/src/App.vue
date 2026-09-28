@@ -14,8 +14,9 @@ import {
   startScan,
   setActiveSource,
   reset,
+  openFullDiskAccess,
 } from './store'
-import { fmtSize, confBadge, sourceSummary } from './utils'
+import { fmtSize, sourceSummary, sourceLabel, recoverConfidence } from './utils'
 import appicon from './assets/appicon.png'
 
 onMounted(initStore)
@@ -88,10 +89,14 @@ function gotoStep(key) {
         >
           <div class="flex items-center gap-2">
             <span>{{ s.kind === 'filesystem' ? '🗂️' : '🧩' }}</span>
-            <span class="flex-1 truncate text-sm text-slate-800">
-              {{ s.kind === 'filesystem' ? s.fsType : 'Raw files' }}
+            <span class="flex-1 truncate text-sm text-slate-800" :title="sourceLabel(s)">
+              {{ sourceLabel(s) }}
             </span>
-            <span v-if="s.confidence" class="text-[10px] px-1.5 py-0.5 rounded" :class="confBadge(s.confidence)">{{ s.confidence }}</span>
+            <span
+              v-if="recoverConfidence(s)"
+              class="text-[10px] px-1.5 py-0.5 rounded"
+              :class="recoverConfidence(s).cls"
+            >{{ recoverConfidence(s).label }}</span>
           </div>
           <div class="text-[11px] text-slate-500 pl-6 mt-0.5">
             <span class="text-emerald-600">{{ sourceSummary(s).recoverable }} recoverable</span>
@@ -205,15 +210,22 @@ function gotoStep(key) {
 
             <div v-else class="mt-6">
               <div class="text-sm font-medium mb-2">Copying… {{ store.clonePct }}%</div>
-              <div class="h-2 bg-slate-200 rounded-full overflow-hidden mb-3">
+              <div class="h-2.5 bg-slate-200 rounded-full overflow-hidden mb-2">
                 <div class="h-full bg-blue-600 transition-all" :style="{ width: store.clonePct + '%' }"></div>
               </div>
-              <div class="text-xs text-slate-500 font-mono bg-slate-50 border rounded-lg p-2 h-28 overflow-auto">
-                <div v-for="(m, i) in store.cloneLog" :key="i">{{ m }}</div>
-              </div>
+              <div class="text-xs text-slate-500">{{ store.cloneStatus || 'Waiting for permission…' }}</div>
             </div>
           </div>
-          <p class="text-xs text-slate-400 mt-3">Tip: cloning a physical drive may need elevated permissions. If it fails, open an existing image instead.</p>
+
+          <div class="mt-3 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 flex items-start gap-2">
+            <span>🔐</span>
+            <div>
+              Reading a drive needs permission. macOS will ask for your password, and you may also need
+              to grant FindIt <b>Full Disk Access</b>.
+              <button class="text-blue-600 hover:underline ml-1" @click="openFullDiskAccess">Open settings…</button>
+              If cloning fails, you can also open an existing image instead.
+            </div>
+          </div>
         </div>
       </div>
 
@@ -251,6 +263,33 @@ function gotoStep(key) {
                 :class="store.rawSelected[t] ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white text-slate-500 border-slate-200'"
               >
                 <input type="checkbox" class="hidden" v-model="store.rawSelected[t]" /> .{{ t }}
+              </label>
+            </div>
+          </div>
+
+          <!-- Advanced: partition picker (only when the drive has more than one) -->
+          <div v-if="store.partitions.length > 1" class="border border-slate-200 rounded-xl bg-white shadow-sm">
+            <button
+              class="w-full flex items-center justify-between px-5 py-3.5 text-left"
+              @click="store.partitionsExpanded = !store.partitionsExpanded"
+            >
+              <span class="font-medium flex items-center gap-1">
+                Advanced: choose partitions
+                <Hint text="This drive has more than one partition. By default FindIt scans them all — you don’t need to change anything. If you know which partition your files were on, expand this to search only that one." />
+              </span>
+              <span class="text-slate-400 text-xs">{{ store.partitionsExpanded ? '▲' : '▼' }}</span>
+            </button>
+            <div v-if="store.partitionsExpanded" class="px-5 pb-4 pt-3 space-y-2 border-t border-slate-100">
+              <p class="text-xs text-slate-500">All partitions are selected by default. Uncheck any you want to skip.</p>
+              <label
+                v-for="p in store.partitions"
+                :key="p.offset"
+                class="flex items-center gap-2 text-sm"
+              >
+                <input type="checkbox" v-model="store.selectedPartitions[String(p.offset)]" />
+                <span class="font-medium">{{ p.fsType }}</span>
+                <span v-if="p.label" class="text-slate-600">“{{ p.label }}”</span>
+                <span class="text-slate-400">· {{ fmtSize(p.size) }}</span>
               </label>
             </div>
           </div>

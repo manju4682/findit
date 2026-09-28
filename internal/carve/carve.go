@@ -6,12 +6,18 @@
 package carve
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/binary"
+	"image"
+	_ "image/jpeg" // register JPEG decoder for image.Decode
+	_ "image/png"  // register PNG decoder for image.Decode
 	"io"
 	"sort"
 
 	"github.com/findit/findit/internal/bytescan"
+	"github.com/findit/findit/internal/config"
 	"github.com/findit/findit/internal/storage"
 )
 
@@ -21,12 +27,17 @@ const maxFileSize = 256 << 20 // 256 MiB
 
 type measurer func(src storage.Source, size, off int64) (length int64, valid bool)
 
+// verifier confirms that a measured file actually opens (not just that its
+// structure is plausible). It runs only after measure has accepted a candidate.
+type verifier func(src storage.Source, off, length int64) bool
+
 // Signature describes how to detect and measure one file type.
 type Signature struct {
 	Ext         string
 	Magic       []byte
 	MagicOffset int // where Magic sits within the file (e.g. 4 for the MP4 ftyp box)
 	measure     measurer
+	verify      verifier // optional: confirms the measured file truly decodes
 }
 
 var registry = map[string]*Signature{}
@@ -36,11 +47,11 @@ var registry = map[string]*Signature{}
 func Register(s *Signature) { registry[s.Ext] = s }
 
 func init() {
-	Register(&Signature{Ext: "jpg", Magic: []byte{0xFF, 0xD8, 0xFF}, measure: measureJPEG})
-	Register(&Signature{Ext: "png", Magic: []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}, measure: measurePNG})
+	Register(&Signature{Ext: "jpg", Magic: []byte{0xFF, 0xD8, 0xFF}, measure: measureJPEG, verify: verifyImage})
+	Register(&Signature{Ext: "png", Magic: []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}, measure: measurePNG, verify: verifyImage})
 	Register(&Signature{Ext: "mp4", Magic: []byte("ftyp"), MagicOffset: 4, measure: measureMP4})
-	Register(&Signature{Ext: "pdf", Magic: []byte("%PDF-"), measure: measurePDF})
-	Register(&Signature{Ext: "zip", Magic: []byte{0x50, 0x4B, 0x03, 0x04}, measure: measureZIP})
+	Register(&Signature{Ext: "pdf", Magic: []byte("%PDF-"), measure: measurePDF, verify: verifyPDF})
+	Register(&Signature{Ext: "zip", Magic: []byte{0x50, 0x4B, 0x03, 0x04}, measure: measureZIP, verify: verifyZIP})
 }
 
 // Supported returns the sorted extensions the native carver understands. The UI
@@ -90,6 +101,12 @@ func Scan(ctx context.Context, src storage.Source, exts []string) ([]Carved, err
 		length, valid := s.sig.measure(src, size, s.off)
 		if length <= 0 {
 			continue
+		}
+		// A structurally-measured file is only reported as recoverable if it also
+		// verifies (e.g. images must actually decode). Files that fail here are
+		// still listed, but as fragments, so the UI never over-promises.
+		if valid && s.sig.verify != nil {
+			valid = s.sig.verify(src, s.off, length)
 		}
 		out = append(out, Carved{Ext: s.sig.Ext, Offset: s.off, Length: length, Valid: valid})
 		coveredEnd = s.off + length
@@ -209,6 +226,55 @@ func validFirstMarker(b byte) bool {
 	return b >= 0xE0 && b <= 0xEF
 }
 
+// verifyImage confirms a measured image actually decodes, so a fragmented or
+// partially-overwritten file whose structure merely looks valid is not reported
+// as recoverable. Images larger than the configured cap are trusted on their
+// structure alone, to keep scan time bounded.
+func verifyImage(src storage.Source, off, length int64) bool {
+	if cap := config.Get().Carve.MaxVerifyBytes; cap > 0 && length > cap {
+		return true
+	}
+	if _, _, err := image.Decode(io.NewSectionReader(src, off, length)); err != nil {
+		return false
+	}
+	return true
+}
+
+// verifyZIP confirms a carved archive's central directory parses (covering
+// zip/docx/xlsx/jar), catching fragmented or truncated archives whose signatures
+// survived but whose index did not. It reads the directory only, never
+// decompressing, so it stays cheap.
+func verifyZIP(src storage.Source, off, length int64) bool {
+	if cap := config.Get().Carve.MaxVerifyBytes; cap > 0 && length > cap {
+		return true
+	}
+	_, err := zip.NewReader(io.NewSectionReader(src, off, length), length)
+	return err == nil
+}
+
+// verifyPDF checks a carved PDF has a version header and a cross-reference
+// pointer (startxref) before its final %%EOF. This is a structural check, not a
+// full render: it rejects fragments whose index is gone, but cannot prove every
+// object in the body survived (there is no standard-library PDF parser).
+func verifyPDF(src storage.Source, off, length int64) bool {
+	var head [8]byte
+	if _, err := src.ReadAt(head[:], off); err != nil {
+		return false
+	}
+	if !bytes.HasPrefix(head[:], []byte("%PDF-1.")) && !bytes.HasPrefix(head[:], []byte("%PDF-2.")) {
+		return false
+	}
+	tailLen := int64(2048)
+	if tailLen > length {
+		tailLen = length
+	}
+	tail := make([]byte, tailLen)
+	if _, err := src.ReadAt(tail, off+length-tailLen); err != nil && err != io.EOF {
+		return false
+	}
+	return bytes.Contains(tail, []byte("startxref")) && bytes.Contains(tail, []byte("%%EOF"))
+}
+
 // measurePNG walks the chunk list from the signature to the IEND chunk.
 func measurePNG(src storage.Source, size, off int64) (int64, bool) {
 	var sig [8]byte
@@ -240,10 +306,13 @@ func measurePNG(src storage.Source, size, off int64) (int64, bool) {
 	return 0, false
 }
 
-// measureMP4 sums consecutive ISO-BMFF boxes starting at the ftyp box.
+// measureMP4 sums consecutive ISO-BMFF boxes starting at the ftyp box. A file is
+// only recoverable if it also carries a moov box: that is the index a player
+// needs, so a fragment that stops before it (or never had it) is not playable.
 func measureMP4(src storage.Source, size, off int64) (int64, bool) {
 	pos := off
 	boxes := 0
+	sawMoov := false
 	for pos+8 <= size && pos-off < maxFileSize {
 		var hdr [8]byte
 		if _, err := src.ReadAt(hdr[:], pos); err != nil {
@@ -257,11 +326,14 @@ func measureMP4(src storage.Source, size, off int64) (int64, bool) {
 		if !printableType(typ) {
 			break
 		}
+		if string(typ) == "moov" {
+			sawMoov = true
+		}
 		switch boxSize {
 		case 1: // 64-bit largesize follows the header
 			var ext [8]byte
 			if _, err := src.ReadAt(ext[:], pos+8); err != nil {
-				return finishMP4(pos, off, boxes)
+				return finishMP4(pos, off, boxes, sawMoov)
 			}
 			boxSize = int64(binary.BigEndian.Uint64(ext[:]))
 		case 0: // box extends to end of source
@@ -273,12 +345,12 @@ func measureMP4(src storage.Source, size, off int64) (int64, bool) {
 		pos += boxSize
 		boxes++
 	}
-	return finishMP4(pos, off, boxes)
+	return finishMP4(pos, off, boxes, sawMoov)
 }
 
-func finishMP4(pos, off int64, boxes int) (int64, bool) {
+func finishMP4(pos, off int64, boxes int, sawMoov bool) (int64, bool) {
 	if boxes >= 1 && pos > off {
-		return pos - off, boxes >= 2 // ftyp + at least one media/metadata box
+		return pos - off, boxes >= 2 && sawMoov // ftyp + a moov index at minimum
 	}
 	return 0, false
 }

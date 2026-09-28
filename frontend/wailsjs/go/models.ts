@@ -33,6 +33,24 @@ export namespace device {
 
 export namespace main {
 	
+	export class PartitionDTO {
+	    offset: number;
+	    fsType: string;
+	    label: string;
+	    size: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PartitionDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.offset = source["offset"];
+	        this.fsType = source["fsType"];
+	        this.label = source["label"];
+	        this.size = source["size"];
+	    }
+	}
 	export class PreviewDTO {
 	    kind: string;
 	    status: string;
