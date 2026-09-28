@@ -1,0 +1,27 @@
+frontend/src/components/Resizer.vue
+  s_5ba931baaa69e0::t_d3b95410bbcfa9 1-51
+frontend/src/components/Explorer.vue
+  s_5ba931baaa69e0::t_4e09dc2ad9e33b 224-225,229-233,358-362,365-366
+  s_5ba931baaa69e0::t_0d83f1afec9d10 2,6,48-63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b46a73757d64b11f76f61a0d280b75d24e5e021e",
+  "prompts": {},
+  "humans": {
+    "h_0a6124cd6bde1e": {
+      "author": "Manjunath Tadlagi (mtadlagi) <mtadlagi@cisco.com>"
+    }
+  },
+  "sessions": {
+    "s_5ba931baaa69e0": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "36c401d8-be74-4a00-990c-9ba3aaca7aa6",
+        "model": "copilot/claude-opus-4.8"
+      },
+      "human_author": "Manjunath Tadlagi (mtadlagi) <mtadlagi@cisco.com>"
+    }
+  }
+}
