@@ -3,8 +3,10 @@ package device
 import (
 	"bytes"
 	"context"
+	"errors"
 	"math/rand"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -51,6 +53,15 @@ func TestList_Runs(t *testing.T) {
 		}
 	}
 	t.Logf("found %d device(s)", len(devs))
+}
+
+func TestFormatDeviceOpenError_ProvidesFullDiskAccessHint(t *testing.T) {
+	msg := formatDeviceOpenError("/dev/rdisk4", errors.New("open /dev/rdisk4: operation not permitted"))
+	for _, want := range []string{"Full Disk Access", "Privacy & Security", "/dev/rdisk4"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("message %q does not contain %q", msg, want)
+		}
+	}
 }
 
 func min(a, b int) int {

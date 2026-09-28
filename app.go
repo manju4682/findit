@@ -114,6 +114,9 @@ func (a *App) StartClone(deviceID, destPath string) error {
 			if strings.Contains(msg, "-128") || strings.Contains(msg, "User canceled") {
 				msg = "Permission was not granted, so the drive wasn’t copied."
 			}
+			if strings.Contains(strings.ToLower(msg), "operation not permitted") || strings.Contains(strings.ToLower(msg), "permission denied") {
+				msg = "macOS blocked raw disk access. Open System Settings → Privacy & Security → Full Disk Access and allow FindIt, then retry. If the app still denies access, clone the drive using the built-in administrator prompt or work from an existing disk image."
+			}
 			if msg == "" {
 				msg = err.Error()
 			}

@@ -5,8 +5,10 @@ package device
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/findit/findit/internal/storage"
 )
@@ -48,7 +50,7 @@ func OpenReadOnly(d Device) (storage.Source, error) {
 	}
 	f, err := os.OpenFile(path, os.O_RDONLY, 0)
 	if err != nil {
-		return nil, fmt.Errorf("device: opening %s read-only: %w", path, err)
+		return nil, fmt.Errorf("%s", formatDeviceOpenError(path, err))
 	}
 	bs := d.BlockSize
 	if bs <= 0 {
@@ -61,6 +63,25 @@ func OpenReadOnly(d Device) (storage.Source, error) {
 		bs:   bs,
 		name: path,
 	}, nil
+}
+
+func formatDeviceOpenError(path string, err error) string {
+	msg := fmt.Sprintf("device: opening %s read-only: %v", path, err)
+	if !isDevicePermissionError(err) {
+		return msg
+	}
+	return msg + "\n\nmacOS blocked raw disk access. Open System Settings → Privacy & Security → Full Disk Access and allow FindIt, then retry. The built-in clone helper can also copy the drive with administrator privileges if you need a safe image-first workflow."
+}
+
+func isDevicePermissionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrPermission) {
+		return true
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "operation not permitted") || strings.Contains(s, "permission denied")
 }
 
 func (s *deviceSource) ReadAt(p []byte, off int64) (int, error) { return s.ra.ReadAt(p, off) }
