@@ -1,8 +1,9 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import FolderTree from './FolderTree.vue'
 import Hint from './Hint.vue'
 import FileThumb from './FileThumb.vue'
+import Resizer from './Resizer.vue'
 import {
   store,
   activeSource,
@@ -44,6 +45,22 @@ const files = computed(() => currentFilesFiltered())
 const summary = computed(() => (src.value ? sourceSummary(src.value) : { total: 0, recoverable: 0, nameOnly: 0 }))
 const conf = computed(() => (src.value ? recoverConfidence(src.value) : null))
 const selCount = computed(() => selectedIds().length)
+
+// Resizable side panels. Widths persist across sessions; double-clicking a
+// divider resets it to the default.
+const TREE_DEFAULT = 224
+const PREVIEW_DEFAULT = 288
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
+const loadWidth = (key, fallback) => {
+  const v = parseInt(localStorage.getItem(key) || '', 10)
+  return Number.isFinite(v) ? v : fallback
+}
+const treeWidth = ref(loadWidth('findit.treeWidth', TREE_DEFAULT))
+const previewWidth = ref(loadWidth('findit.previewWidth', PREVIEW_DEFAULT))
+watch(treeWidth, (v) => localStorage.setItem('findit.treeWidth', String(v)))
+watch(previewWidth, (v) => localStorage.setItem('findit.previewWidth', String(v)))
+const resizeTree = (d) => (treeWidth.value = clamp(treeWidth.value + d, 160, 480))
+const resizePreview = (d) => (previewWidth.value = clamp(previewWidth.value - d, 200, 560))
 </script>
 
 <template>
@@ -204,10 +221,16 @@ const selCount = computed(() => selectedIds().length)
       <!-- Left: folder tree -->
       <aside
         v-if="src && src.kind === 'filesystem' && src.root"
-        class="w-56 border-r bg-slate-50/70 overflow-auto p-2 shrink-0"
+        class="border-r bg-slate-50/70 overflow-auto p-2 shrink-0"
+        :style="{ width: treeWidth + 'px' }"
       >
         <FolderTree :node="src.root" :label="sourceLabel(src)" />
       </aside>
+      <Resizer
+        v-if="src && src.kind === 'filesystem' && src.root"
+        @resize="resizeTree"
+        @reset="treeWidth = TREE_DEFAULT"
+      />
 
       <!-- Center: contents -->
       <section class="flex-1 overflow-auto p-4">
@@ -332,9 +355,15 @@ const selCount = computed(() => selectedIds().length)
       </section>
 
       <!-- Right: preview (list/details) -->
+      <Resizer
+        v-if="store.selectedFile && store.viewMode !== 'grid'"
+        @resize="resizePreview"
+        @reset="previewWidth = PREVIEW_DEFAULT"
+      />
       <aside
         v-if="store.selectedFile && store.viewMode !== 'grid'"
-        class="w-72 border-l bg-slate-50/60 overflow-auto p-4 shrink-0"
+        class="border-l bg-slate-50/60 overflow-auto p-4 shrink-0"
+        :style="{ width: previewWidth + 'px' }"
       >
         <div class="text-sm font-medium truncate mb-3">{{ store.selectedFile.name }}</div>
         <div class="rounded-xl border bg-white flex items-center justify-center min-h-[160px] mb-3 overflow-hidden">
