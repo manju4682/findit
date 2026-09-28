@@ -1,0 +1,284 @@
+internal/preview/preview.go
+  s_5ba931baaa69e0::t_4cb2e6ea11c83e 1-3
+  s_5ba931baaa69e0::t_c1e992e4337ce5 16-145
+  s_5ba931baaa69e0::t_f035f07fd70567 4-6,13-15
+  s_5ba931baaa69e0::t_77d6946b5d40a2 146-148
+  h_0a6124cd6bde1e 7-12,149-243
+frontend/wailsjs/go/models.ts
+  s_5ba931baaa69e0::t_3baac0d118606c 1-110
+internal/extract/extract.go
+  s_5ba931baaa69e0::t_4cb2e6ea11c83e 1-3
+  s_5ba931baaa69e0::t_c608e8b7802bff 4-6
+  h_0a6124cd6bde1e 7-197
+frontend/src/App.vue
+  s_5ba931baaa69e0::t_3f6e5fbda866ad 45-47
+  s_5ba931baaa69e0::t_730127ef45913d 18
+  s_5ba931baaa69e0::t_7da4ece9632b0b 146,170-175,177-180
+  s_5ba931baaa69e0::t_44a4e2ae92f005 19,48
+  h_0a6124cd6bde1e 50,176,192
+  s_5ba931baaa69e0::t_c925617c1fb501 1-17,20-44,49,51-145,147-169,181-191,193-286
+.gitignore
+  h_0a6124cd6bde1e 1-20
+frontend/src/components/FolderTree.vue
+  s_5ba931baaa69e0::t_730127ef45913d 3-4
+  s_5ba931baaa69e0::t_bcc00802d5e742 22-23,36,39
+  s_5ba931baaa69e0::t_e8f5b03c9eae86 1-2,5-21,24-35,37-38,40-42
+frontend/wailsjs/runtime/runtime.d.ts
+  s_5ba931baaa69e0::t_3baac0d118606c 1-330
+frontend/src/utils.js
+  s_5ba931baaa69e0::t_b9b78590b24197 1-100
+frontend/wailsjs/go/main/App.js
+  s_5ba931baaa69e0::t_d76ecedbcd34c7 17-20
+  s_5ba931baaa69e0::t_3baac0d118606c 1-16,21-47
+cmd/findit-diagnose/main.go
+  s_5ba931baaa69e0::t_6a29fdebdf8f89 1-3
+  s_5ba931baaa69e0::t_6300f2677fb771 4-6
+  h_0a6124cd6bde1e 7-71
+internal/preview/preview_test.go
+  s_5ba931baaa69e0::t_ec44e1ed38bac2 12-16
+  s_5ba931baaa69e0::t_8c41e7ce95f62f 9-11
+  s_5ba931baaa69e0::t_17330782797cee 17-19
+  h_0a6124cd6bde1e 1-8,20-85
+internal/model/model.go
+  h_0a6124cd6bde1e 1-72
+frontend/index.html
+  h_0a6124cd6bde1e 1-12
+internal/session/session.go
+  s_5ba931baaa69e0::t_4cb2e6ea11c83e 1-3
+  s_5ba931baaa69e0::t_81f4003a55e938 4-6
+  h_0a6124cd6bde1e 7-202
+frontend/src/store.js
+  s_5ba931baaa69e0::t_280c89eb2d0c1a 14,256,268,311-315,320-333
+  s_5ba931baaa69e0::t_7f15f66eedad50 18
+  s_5ba931baaa69e0::t_a0cde59e644f3b 1-13,15-17,19-50,53-193,205,211-217,222-225,227-228,249-255,257-267,269-310,316-319,334-400
+  s_5ba931baaa69e0::t_41e9872cd5e76e 51-52,194-204,206-210,218-221,226,229-248
+internal/extract/extract_test.go
+  s_5ba931baaa69e0::t_04be05c613c5b3 15-19
+  s_5ba931baaa69e0::t_63c9c5cb784c92 12-14
+  s_5ba931baaa69e0::t_bed45292ee630e 20-22
+  h_0a6124cd6bde1e 1-11,23-146
+scripts/make_fixture.sh
+  h_0a6124cd6bde1e 1-78
+frontend/wailsjs/runtime/runtime.js
+  s_5ba931baaa69e0::t_3baac0d118606c 1-298
+internal/diagnosis/scan.go
+  s_5ba931baaa69e0::t_4cb2e6ea11c83e 1-3
+  s_5ba931baaa69e0::t_fdc10cb8f916c9 4-6
+  h_0a6124cd6bde1e 7-119
+internal/engines/tsk/tsk_test.go
+  s_5ba931baaa69e0::t_0bebda2dd46a25 10-14
+  s_5ba931baaa69e0::t_9a6f431f1ca8f7 7-9
+  s_5ba931baaa69e0::t_341d7261cd818c 15-17
+  h_0a6124cd6bde1e 1-6,18-117
+internal/jobs/jobs.go
+  s_5ba931baaa69e0::t_4cb2e6ea11c83e 1-3
+  s_5ba931baaa69e0::t_af1ce0aae009f6 4-6
+  h_0a6124cd6bde1e 7-104
+internal/imaging/imaging.go
+  s_5ba931baaa69e0::t_4cb2e6ea11c83e 1-3
+  s_5ba931baaa69e0::t_f87efa4eff1673 4-6
+  h_0a6124cd6bde1e 7-175
+frontend/wailsjs/go/main/App.d.ts
+  s_5ba931baaa69e0::t_3baac0d118606c 1-11,14-26
+  s_5ba931baaa69e0::t_d76ecedbcd34c7 12-13
+internal/device/device.go
+  h_0a6124cd6bde1e 2
+  s_5ba931baaa69e0::t_4cb2e6ea11c83e 1,3
+  s_5ba931baaa69e0::t_1723e4657057e0 4-6
+  h_0a6124cd6bde1e 7-70
+scripts/make_fs_fixture.sh
+  h_0a6124cd6bde1e 1-73
+internal/recovery/recovery.go
+  s_5ba931baaa69e0::t_4cb2e6ea11c83e 1-4
+  s_5ba931baaa69e0::t_2df1318f2e4072 5-7
+  h_0a6124cd6bde1e 8-104
+main.go
+  h_0a6124cd6bde1e 18,29
+  s_5ba931baaa69e0::t_2f27cb1cf9abaf 9,21-28,30-32
+  s_5ba931baaa69e0::t_c1671e423d2295 6-8
+  s_5ba931baaa69e0::t_866047789d7923 33-35
+  h_0a6124cd6bde1e 1-5,10-17,19-20,36-39
+app.go
+  s_5ba931baaa69e0::t_43ee0ce6cdcf66 8,10,185-198
+  s_5ba931baaa69e0::t_f53302081b77a2 37-84,89-95,97-99,105,116,121-122,124-125,167,173,176-178,184,199,205,216-241,244,250,255,258,278-279,282,295-296,301,304-305,315,319,323,326,331,333,340,347,351,359-360,363,366,368,370,378,380
+  s_5ba931baaa69e0::t_4e5bfab3b2c998 85-88,96,100-104,106-115,117-120,123,126-166,209,267-268,271-272,291,294,358,376
+  s_5ba931baaa69e0::t_4be9836a52d52a 7,9,11-13
+  s_5ba931baaa69e0::t_59e951bd8dd174 4-6
+  s_5ba931baaa69e0::t_1ac44019c9531d 14-16,34-36
+  s_5ba931baaa69e0::t_e6cffce63ba57d 168-172
+  s_5ba931baaa69e0::t_82a465e7b7d001 174-175
+  s_5ba931baaa69e0::t_5f9f4908b08a23 179-183
+  s_5ba931baaa69e0::t_39a0f6480894f5 200-204
+  s_5ba931baaa69e0::t_81d3fef576f9f3 206-208
+  s_5ba931baaa69e0::t_5525d87cda250d 210-215
+  s_5ba931baaa69e0::t_1cf05a3fdc7d74 242-243
+  s_5ba931baaa69e0::t_c1815ac183ffd4 245-249
+  s_5ba931baaa69e0::t_29f594252f74f7 251-254
+  s_5ba931baaa69e0::t_4f838e7c7f4626 256-257
+  s_5ba931baaa69e0::t_89dd0b3e97f0c5 259-261,264-266
+  s_5ba931baaa69e0::t_307b68f59e6d30 269-270
+  s_5ba931baaa69e0::t_549b915d9ac5a0 273-277
+  s_5ba931baaa69e0::t_ef80d0776d894a 280-281
+  s_5ba931baaa69e0::t_96244a84b7daf5 283-285,288-290
+  s_5ba931baaa69e0::t_d449642737cb2c 292-293
+  s_5ba931baaa69e0::t_264e0073e7f3f0 297-300
+  s_5ba931baaa69e0::t_cf20dc1ec608ae 302-303
+  s_5ba931baaa69e0::t_a69b40c711a89a 306-308,312-314
+  s_5ba931baaa69e0::t_b57e5854221705 316-318
+  s_5ba931baaa69e0::t_9292fdcab25cc4 320-322
+  s_5ba931baaa69e0::t_05c07366cd479d 324-325
+  s_5ba931baaa69e0::t_29e5f6aef7993c 327-330
+  s_5ba931baaa69e0::t_4e5a868168162f 332
+  s_5ba931baaa69e0::t_503a14972b505d 334-339
+  s_5ba931baaa69e0::t_97f0b7b54eb4de 341-346
+  s_5ba931baaa69e0::t_c93f5daece2b21 348-350
+  s_5ba931baaa69e0::t_da4e09abe417b9 352-357
+  s_5ba931baaa69e0::t_55080483ad5dbe 361-362
+  s_5ba931baaa69e0::t_8902068f5f1b3d 364-365
+  s_5ba931baaa69e0::t_e4b4ef909e4544 367
+  s_5ba931baaa69e0::t_f1d0c96d0bcf83 369
+  s_5ba931baaa69e0::t_a0d75ab216dea2 371-375
+  s_5ba931baaa69e0::t_653ea728bb1e5c 377
+  s_5ba931baaa69e0::t_fdd68b84df814a 379
+  h_0a6124cd6bde1e 1-3,17-33,262-263,286-287,309-311
+wails.json
+  h_0a6124cd6bde1e 1-12
+internal/storage/source.go
+  s_5ba931baaa69e0::t_4cb2e6ea11c83e 2-3
+  h_0a6124cd6bde1e 1
+  s_5ba931baaa69e0::t_4b10db48e101bb 4-6
+  h_0a6124cd6bde1e 7-77
+internal/bytescan/bytescan.go
+  s_5ba931baaa69e0::t_4cb2e6ea11c83e 1-3
+  s_5ba931baaa69e0::t_e9e1e4c3b22687 4-6
+  h_0a6124cd6bde1e 7-71
+internal/diagnosis/diagnose_test.go
+  s_5ba931baaa69e0::t_1f636d9ac42117 7-11
+  s_5ba931baaa69e0::t_6ac1ef8ab6fc71 4-6
+  s_5ba931baaa69e0::t_a85e7a776f8a6a 12-14
+  h_0a6124cd6bde1e 1-3,15-50
+frontend/src/components/Hint.vue
+  s_5ba931baaa69e0::t_0dccfbcdbb71f1 1-46
+scripts/bundle_engines.sh
+  s_5ba931baaa69e0::t_e0ff2d653c1fe4 1-25,28,30-33,35-40,47,49-84
+  s_5ba931baaa69e0::t_1ecdc71eb864e7 26-27,29,34,41-46,48
+frontend/wailsjs/runtime/package.json
+  s_5ba931baaa69e0::t_3baac0d118606c 1-24
+internal/engines/tsk/tsk.go
+  s_5ba931baaa69e0::t_e96675a920508c 12-67,74,79,92-93,100,103,105,114,124,136,140,144,147,157,162-307,313,315
+  s_5ba931baaa69e0::t_4cb2e6ea11c83e 1-3
+  h_0a6124cd6bde1e 81
+  s_5ba931baaa69e0::t_5f204b0385e4bd 4-6,9-11
+  s_5ba931baaa69e0::t_deb144fb6f38ff 68-73
+  s_5ba931baaa69e0::t_f0db0d4226a0ca 75-78
+  s_5ba931baaa69e0::t_c7b9d343276fc4 94-99
+  s_5ba931baaa69e0::t_2c802adb6c57f0 101-102
+  s_5ba931baaa69e0::t_9d66aaa5a08576 104
+  s_5ba931baaa69e0::t_a96f5f232cd131 106-108,111-113
+  s_5ba931baaa69e0::t_fb0dfa1a2016b7 115-117,121-123
+  s_5ba931baaa69e0::t_57b925a5341309 125-127,133-135
+  s_5ba931baaa69e0::t_d4febcd12c2551 137-139
+  s_5ba931baaa69e0::t_61b21ac7331669 141-143
+  s_5ba931baaa69e0::t_4ec409557d4a51 145-146
+  s_5ba931baaa69e0::t_964825669dfa32 148-150,154-156
+  s_5ba931baaa69e0::t_daabdbceb2968e 158-161
+  s_5ba931baaa69e0::t_0ce56408260d92 308-312
+  s_5ba931baaa69e0::t_36778c51d009c6 314
+  h_0a6124cd6bde1e 7-8,80,82-91,109-110,118-120,128-132,151-153
+internal/recovery/recovery_test.go
+  s_5ba931baaa69e0::t_5758cb0b69c456 14-18
+  s_5ba931baaa69e0::t_5de9cf7551ce0d 11-13
+  s_5ba931baaa69e0::t_39de295e5646fe 19-21
+  h_0a6124cd6bde1e 1-10,22-125
+internal/carve/carve_test.go
+  s_5ba931baaa69e0::t_92974dceb2e3d4 12-16
+  s_5ba931baaa69e0::t_0a76b6472a34e6 9-11
+  s_5ba931baaa69e0::t_9c4c9a91070b5b 17-19
+  h_0a6124cd6bde1e 1-8,20-137
+cmd/findit-imagecopy/main.go
+  s_5ba931baaa69e0::t_9112ab2997579d 1-61
+internal/testutil/fixtures.go
+  s_5ba931baaa69e0::t_a6c01efcf5ae95 1-52
+frontend/src/components/Explorer.vue
+  s_5ba931baaa69e0::t_3f6e5fbda866ad 83-84
+  s_5ba931baaa69e0::t_729767630d4108 26-27,156-189
+  s_5ba931baaa69e0::t_065615e4b3e077 28-29,36-37
+  s_5ba931baaa69e0::t_02f4210edfbf5c 1-25,30-35,38-82,85-155,190-368
+scripts/build_dmg.sh
+  h_0a6124cd6bde1e 3,17-18
+  s_5ba931baaa69e0::t_24678ccbd44944 1-2,4-16,19-45
+internal/session/session_test.go
+  s_5ba931baaa69e0::t_3a8fc3871158b3 11-15
+  s_5ba931baaa69e0::t_027fa13e56ce40 8-10
+  s_5ba931baaa69e0::t_3b0e2ffe12a5fd 16-18
+  h_0a6124cd6bde1e 1-7,19-124
+frontend/package-lock.json
+  h_0a6124cd6bde1e 1-2316
+frontend/package.json
+  h_0a6124cd6bde1e 1-21
+frontend/package.json.md5
+  h_0a6124cd6bde1e 1
+frontend/postcss.config.js
+  h_0a6124cd6bde1e 1-6
+frontend/src/main.js
+  h_0a6124cd6bde1e 1-5
+frontend/src/style.css
+  h_0a6124cd6bde1e 1-18
+frontend/tailwind.config.js
+  h_0a6124cd6bde1e 1-8
+frontend/vite.config.js
+  h_0a6124cd6bde1e 1-6
+go.mod
+  h_0a6124cd6bde1e 1-36
+go.sum
+  h_0a6124cd6bde1e 1-83
+internal/bytescan/bytescan_test.go
+  h_0a6124cd6bde1e 1-47
+internal/carve/carve.go
+  h_0a6124cd6bde1e 1-345
+internal/device/aligned.go
+  h_0a6124cd6bde1e 1-54
+internal/device/device_darwin.go
+  h_0a6124cd6bde1e 1-97
+internal/device/device_other.go
+  h_0a6124cd6bde1e 1-15
+internal/device/device_test.go
+  h_0a6124cd6bde1e 1-61
+internal/diagnosis/diagnose.go
+  h_0a6124cd6bde1e 1-169
+internal/extract/device_unix.go
+  h_0a6124cd6bde1e 1-17
+internal/imaging/imaging_test.go
+  h_0a6124cd6bde1e 1-133
+internal/jobs/jobs_test.go
+  h_0a6124cd6bde1e 1-60
+internal/model/recovery.go
+  h_0a6124cd6bde1e 1-94
+internal/storage/source_test.go
+  h_0a6124cd6bde1e 1-58
+scripts/genmedia/main.go
+  h_0a6124cd6bde1e 1-109
+testdata/fixtures/fat32_files.manifest.txt
+  h_0a6124cd6bde1e 1-7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cce73fa781e4e420daa1f45bec3723c576c32436",
+  "prompts": {},
+  "humans": {
+    "h_0a6124cd6bde1e": {
+      "author": "Manjunath Tadlagi (mtadlagi) <mtadlagi@cisco.com>"
+    }
+  },
+  "sessions": {
+    "s_5ba931baaa69e0": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "36c401d8-be74-4a00-990c-9ba3aaca7aa6",
+        "model": "copilot/claude-opus-4.8"
+      },
+      "human_author": "Manjunath Tadlagi (mtadlagi) <mtadlagi@cisco.com>"
+    }
+  }
+}
