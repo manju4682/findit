@@ -1,0 +1,25 @@
+README.md
+  s_5ba931baaa69e0::t_ba9fa408fab3f9 1,3-63
+  s_5ba931baaa69e0::t_1531e5a9c254cf 2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "45c44203ffe44a4b9dabbcebde30c7da237ac952",
+  "prompts": {},
+  "humans": {
+    "h_0a6124cd6bde1e": {
+      "author": "Manjunath Tadlagi (mtadlagi) <mtadlagi@cisco.com>"
+    }
+  },
+  "sessions": {
+    "s_5ba931baaa69e0": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "36c401d8-be74-4a00-990c-9ba3aaca7aa6",
+        "model": "copilot/claude-opus-4.8"
+      },
+      "human_author": "Manjunath Tadlagi (mtadlagi) <mtadlagi@cisco.com>"
+    }
+  }
+}
