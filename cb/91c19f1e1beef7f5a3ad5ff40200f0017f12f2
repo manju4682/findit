@@ -1,0 +1,127 @@
+testdata/fixtures/changed_fs_fat32_to_exfat.manifest.txt
+  s_5ba931baaa69e0::t_34ed65ae22dafc 1-15
+frontend/src/store.js
+  s_5ba931baaa69e0::t_68c42f6797063c 16,374-378
+  s_5ba931baaa69e0::t_fa842b2b24cab7 387-388
+  s_5ba931baaa69e0::t_ef96041222ccc6 440
+  s_5ba931baaa69e0::t_c0ad7656d941b8 12,20,44-48,135,171-196,213,215,243,379-380
+  s_5ba931baaa69e0::t_3d66377d30852d 35,62,150,322-327,430
+  s_5ba931baaa69e0::t_4318b072e45821 381
+internal/preview/preview.go
+  s_5ba931baaa69e0::t_e5cb644ac30263 109-110
+  s_5ba931baaa69e0::t_7fbda3aa2bf7a5 89-90
+internal/engines/tsk/tsk.go
+  s_5ba931baaa69e0::t_55d3400b0b224a 128,144-146,153-159
+internal/model/recovery.go
+  s_5ba931baaa69e0::t_8dc2c4a1151c0b 76,91-93
+  s_5ba931baaa69e0::t_1722947cc29d1b 79-82
+  s_5ba931baaa69e0::t_0565d695506632 73-75
+  s_5ba931baaa69e0::t_1df80b43272e4e 77-78
+  h_0a6124cd6bde1e 72
+frontend/src/components/Explorer.vue
+  s_5ba931baaa69e0::t_0afc3f26e2e23d 101-111,120-122,124-125
+  s_5ba931baaa69e0::t_cf559f1a90149c 5,10,36,43,45
+  s_5ba931baaa69e0::t_e27cea72e62df7 35
+  s_5ba931baaa69e0::t_9a63d1e0507732 117,209
+  s_5ba931baaa69e0::t_04b1c26b0bba86 248
+internal/config/config.go
+  s_5ba931baaa69e0::t_74b73c8d495341 1-46,52-66,68-105,107-109
+  s_5ba931baaa69e0::t_7928c48be7687b 47-51,67,106
+internal/diagnosis/diagnose.go
+  s_5ba931baaa69e0::t_f123ae12802365 171-175,177,191,194,197,200,206,208
+  s_5ba931baaa69e0::t_24a5c1be06390d 8
+  s_5ba931baaa69e0::t_678b3cd11b5ef6 28-29,31-32
+  s_5ba931baaa69e0::t_fc03791e59abaf 30,37,43,72-112,202-203
+  s_5ba931baaa69e0::t_a338e772fa5c64 39-40,42,44-45
+  s_5ba931baaa69e0::t_dc30c00154b841 41,46-47,49-54,63-65,113-116,128-130,141,150,161,218-225,231-232,237,239
+  s_5ba931baaa69e0::t_75e9c23c767855 38
+internal/carve/carve.go
+  s_5ba931baaa69e0::t_71a5ccb365c8b7 13-15,20,30-33,40,50-51,105-109
+  s_5ba931baaa69e0::t_63ca7c5b7f61aa 229-240,276-277
+  s_5ba931baaa69e0::t_6c028adeb8c0ae 9-10,53-54,241-275
+  s_5ba931baaa69e0::t_9d7dea83339b68 110,309-311,315,329-331,336,348,351,353
+internal/model/model.go
+  s_5ba931baaa69e0::t_8dc2c4a1151c0b 38
+  s_5ba931baaa69e0::t_1ea8444973a3c3 70
+frontend/wailsjs/go/main/App.js
+  s_5ba931baaa69e0::t_9e1635efadfb80 5-8,45-46,49-50
+  s_5ba931baaa69e0::t_1fc64fd207f816 13-16
+scripts/genmedia/main.go
+  s_5ba931baaa69e0::t_65ccd91deada1a 81-83,87
+internal/session/session_test.go
+  s_5ba931baaa69e0::t_9910c12f14fc9e 125-150
+internal/session/session.go
+  s_5ba931baaa69e0::t_974b1ff9017d78 85,105,133,140-143,148-153,166-167,170-171
+  s_5ba931baaa69e0::t_ac98804209b139 182-183
+  s_5ba931baaa69e0::t_479a3330fc5416 208-213,215-219
+  s_5ba931baaa69e0::t_46935399d03770 164-165,168-169
+  s_5ba931baaa69e0::t_a21314e7763213 12,62,185,192,194
+internal/diagnosis/scan.go
+  s_5ba931baaa69e0::t_fdf02d3203390b 12,88
+  s_5ba931baaa69e0::t_186910e5056d25 18-30,56,60,62,64-65,124
+frontend/src/App.vue
+  s_5ba931baaa69e0::t_68c42f6797063c 17
+  s_5ba931baaa69e0::t_d05c0ed1248855 19,92-93,270-292
+  s_5ba931baaa69e0::t_f44847813dad8e 95-99
+  s_5ba931baaa69e0::t_1d9eab72e4d646 213,216-226,294-295
+  s_5ba931baaa69e0::t_a1d4b5fd6d948e 293,296
+frontend/wailsjs/go/main/App.d.ts
+  s_5ba931baaa69e0::t_1fc64fd207f816 10-11
+  s_5ba931baaa69e0::t_9e1635efadfb80 4-6,26,28
+frontend/src/components/FileThumb.vue
+  s_5ba931baaa69e0::t_ae29ba7f668889 1-34
+internal/config/templates/configmap.yml
+  s_5ba931baaa69e0::t_35b39365cbb9e9 36-40
+  s_5ba931baaa69e0::t_4272ff9276833e 1-35,41-43
+frontend/src/utils.js
+  s_5ba931baaa69e0::t_1c049abcd1d775 82-91
+  s_5ba931baaa69e0::t_7fa60bb68412c0 94,96-109
+internal/config/config_test.go
+  s_5ba931baaa69e0::t_3760a8f3f0aef9 1-20
+app.go
+  s_5ba931baaa69e0::t_c20810d8dcf0e1 20,55-82,261,278,282,294
+  s_5ba931baaa69e0::t_23e52e9957ced4 18,164,369
+  s_5ba931baaa69e0::t_7621e84aae6132 253-256,267
+  s_5ba931baaa69e0::t_39eaf03dd7f51e 234-239
+internal/diagnosis/partitions.go
+  s_5ba931baaa69e0::t_090a0f5111054e 6,8-105
+  s_5ba931baaa69e0::t_ce5754e70f8ded 3-5
+  s_5ba931baaa69e0::t_f869787f907733 7
+  s_5ba931baaa69e0::t_26339c52f5fe44 106-108
+  s_5ba931baaa69e0::t_5fbd4b421e5bbf 1-2,109-120
+go.mod
+  s_5ba931baaa69e0::t_aeaf52047e612f 5-8
+internal/carve/carve_test.go
+  s_5ba931baaa69e0::t_bdd2e19f1e6b58 128-153,156,160,162-173
+  s_5ba931baaa69e0::t_7189a733853226 154-155,157-159,161
+  h_0a6124cd6bde1e 11
+  s_5ba931baaa69e0::t_a03b16e9530717 174-208
+  s_5ba931baaa69e0::t_6ca76b5489b8cc 4
+  s_5ba931baaa69e0::t_c0a23d4eb1223a 7
+  s_5ba931baaa69e0::t_8e11e8b1b867a3 105-127,209-227
+frontend/wailsjs/go/models.ts
+  s_5ba931baaa69e0::t_9e1635efadfb80 36-53
+go.sum
+  s_5ba931baaa69e0::t_6552b5d6f713ff 17-18,41-42,86-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cb91c19f1e1beef7f5a3ad5ff40200f0017f12f2",
+  "prompts": {},
+  "humans": {
+    "h_0a6124cd6bde1e": {
+      "author": "Manjunath Tadlagi (mtadlagi) <mtadlagi@cisco.com>"
+    }
+  },
+  "sessions": {
+    "s_5ba931baaa69e0": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "36c401d8-be74-4a00-990c-9ba3aaca7aa6",
+        "model": "copilot/claude-opus-4.8"
+      },
+      "human_author": "Manjunath Tadlagi (mtadlagi) <mtadlagi@cisco.com>"
+    }
+  }
+}
