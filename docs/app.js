@@ -214,40 +214,9 @@
     );
   }
 
-  // ---- Stat counters. Zeros count down, everything else counts up. ----
-  const counters = document.querySelectorAll('[data-counter]');
-  const countTo = (el) => {
-    const target = Number(el.dataset.counter);
-    const from = target === 0 ? 9999 : 0;
-    const fmt = (v) => `${el.dataset.prefix || ''}${Math.round(v).toLocaleString()}${el.dataset.suffix || ''}`;
-    if (reduceMotion) return (el.textContent = fmt(target));
-    const start = performance.now();
-    const DURATION = 1400;
-    const tick = (t) => {
-      const p = Math.min(1, (t - start) / DURATION);
-      const eased = 1 - Math.pow(1 - p, 3);
-      el.textContent = fmt(from + (target - from) * eased);
-      if (p < 1) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  };
-  const counterObs = new IntersectionObserver(
-    (entries) => {
-      for (const e of entries) {
-        if (e.isIntersecting) {
-          countTo(e.target);
-          counterObs.unobserve(e.target);
-        }
-      }
-    },
-    { threshold: 0.6 },
-  );
-  counters.forEach((c) => counterObs.observe(c));
-
   // ---- Latest release details (best effort; the page works without them). ----
   const applyRelease = (rel) => {
     if (!rel || !rel.tag_name) return;
-    const dmg = (rel.assets || []).find((a) => a.name.endsWith('.dmg'));
     const pill = document.querySelector('[data-version]');
     if (pill) {
       pill.textContent = rel.tag_name;
@@ -255,10 +224,6 @@
     }
     const suffix = document.querySelector('[data-version-suffix]');
     if (suffix) suffix.textContent = ` ${rel.tag_name}`;
-    if (dmg) {
-      const mb = `${Math.round(dmg.size / 1e6)} MB`;
-      document.querySelectorAll('[data-size]').forEach((el) => (el.textContent = mb));
-    }
     const meta = document.querySelector('[data-release-meta]');
     if (meta && rel.published_at) {
       const date = new Date(rel.published_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
@@ -273,7 +238,7 @@
       .then((r) => (r.ok ? r.json() : null))
       .then((rel) => {
         if (!rel) return;
-        const slim = { tag_name: rel.tag_name, published_at: rel.published_at, assets: (rel.assets || []).map((a) => ({ name: a.name, size: a.size })) };
+        const slim = { tag_name: rel.tag_name, published_at: rel.published_at };
         sessionStorage.setItem('findit-release', JSON.stringify(slim));
         applyRelease(slim);
       })
