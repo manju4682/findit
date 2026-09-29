@@ -5,14 +5,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"image"
 	"image/jpeg"
 	"image/png"
 	"io"
 	"os"
 	"testing"
 
-	"github.com/findit/findit/internal/storage"
-	"github.com/findit/findit/internal/testutil"
+	"github.com/manju4682/findit/internal/storage"
+	"github.com/manju4682/findit/internal/testutil"
 )
 
 func fixture(t *testing.T) storage.Source {
@@ -106,9 +107,10 @@ func TestScan_OnlyRequestedExtensions(t *testing.T) {
 // that passes JPEG structural checks (SOI, a valid first marker, an SOS, and an
 // EOI) but is not a real image must be reported as a fragment, not recoverable.
 func TestScan_RejectsUndecodableJPEG(t *testing.T) {
-	fake := []byte{0xFF, 0xD8, 0xFF, 0xE0} // SOI + APP0 marker
-	fake = append(fake, bytes.Repeat([]byte{0x00}, 16)...)
-	fake = append(fake, 0xFF, 0xDA) // SOS
+	fake := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10} // SOI + APP0 (length 16)
+	fake = append(fake, bytes.Repeat([]byte{0x00}, 14)...)
+	fake = append(fake, 0xFF, 0xDA, 0x00, 0x08) // SOS (length 8)
+	fake = append(fake, bytes.Repeat([]byte{0x00}, 6)...)
 	fake = append(fake, bytes.Repeat([]byte{0x11, 0x22, 0x33}, 64)...)
 	fake = append(fake, 0xFF, 0xD9) // EOI
 
@@ -168,6 +170,41 @@ func TestScan_VerifiesZIP(t *testing.T) {
 	}
 	if carved[0].Valid {
 		t.Error("zip with a corrupt central directory marked Valid; verify should reject it")
+	}
+}
+
+// TestScan_JPEGWithEmbeddedThumbnail covers the common camera layout: an EXIF
+// APP1 segment carrying a complete thumbnail JPEG. The carve must span the
+// whole photo, not stop at the thumbnail's EOI.
+func TestScan_JPEGWithEmbeddedThumbnail(t *testing.T) {
+	encode := func(w, h int) []byte {
+		img := image.NewRGBA(image.Rect(0, 0, w, h))
+		for i := range img.Pix {
+			img.Pix[i] = byte(i * 7)
+		}
+		var b bytes.Buffer
+		if err := jpeg.Encode(&b, img, nil); err != nil {
+			t.Fatal(err)
+		}
+		return b.Bytes()
+	}
+	thumb, main := encode(16, 16), encode(64, 48)
+
+	app1 := append([]byte("Exif\x00\x00"), thumb...)
+	seg := []byte{0xFF, 0xE1, byte((len(app1) + 2) >> 8), byte(len(app1) + 2)}
+	photo := append(append(append([]byte{}, main[:2]...), seg...), app1...)
+	photo = append(photo, main[2:]...)
+
+	data := append(append(bytes.Repeat([]byte{0}, 512), photo...), bytes.Repeat([]byte{0}, 512)...)
+	carved, err := Scan(context.Background(), memSource(t, data), []string{"jpg"})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(carved) != 1 {
+		t.Fatalf("got %d findings, want 1: %+v", len(carved), carved)
+	}
+	if c := carved[0]; c.Offset != 512 || c.Length != int64(len(photo)) || !c.Valid {
+		t.Fatalf("carved %+v, want offset 512 length %d valid", c, len(photo))
 	}
 }
 

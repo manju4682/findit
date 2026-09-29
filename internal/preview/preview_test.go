@@ -3,13 +3,15 @@ package preview
 import (
 	"bytes"
 	"context"
+	"image"
 	"image/png"
 	"testing"
+	"time"
 
-	"github.com/findit/findit/internal/carve"
-	"github.com/findit/findit/internal/model"
-	"github.com/findit/findit/internal/storage"
-	"github.com/findit/findit/internal/testutil"
+	"github.com/manju4682/findit/internal/carve"
+	"github.com/manju4682/findit/internal/model"
+	"github.com/manju4682/findit/internal/storage"
+	"github.com/manju4682/findit/internal/testutil"
 )
 
 func fixture(t *testing.T) storage.Source {
@@ -63,6 +65,10 @@ func TestGenerate_ImageThumbnails(t *testing.T) {
 }
 
 func TestGenerate_VideoDegradesGracefully(t *testing.T) {
+	// The synthetic clip has no real frames; don't wait long for a thumbnailer.
+	defer func(d time.Duration) { snapshotTimeout = d }(snapshotTimeout)
+	snapshotTimeout = time.Second
+
 	src := fixture(t)
 	f := firstValidFile(t, src, "mp4")
 	p := Generate(context.Background(), src, f, 64)
@@ -73,6 +79,37 @@ func TestGenerate_VideoDegradesGracefully(t *testing.T) {
 	// without ffmpeg; the call must never error out.
 	if p.Status == model.StatusPartial {
 		t.Errorf("unexpected Partial status for a structurally valid container")
+	}
+}
+
+// opaque hides an image's concrete type, forcing scaleDown's generic path.
+type opaque struct{ image.Image }
+
+// TestScaleDown_FastPathsMatchGeneric checks the direct-buffer averaging for
+// JPEG (YCbCr) and RGBA images agrees with the generic At() path.
+func TestScaleDown_FastPathsMatchGeneric(t *testing.T) {
+	r := image.Rect(0, 0, 301, 199)
+	ycc := image.NewYCbCr(r, image.YCbCrSubsampleRatio420)
+	for i := range ycc.Y {
+		ycc.Y[i] = uint8(i * 31)
+	}
+	for i := range ycc.Cb {
+		ycc.Cb[i], ycc.Cr[i] = uint8(i*17), uint8(i*13)
+	}
+	rgba := image.NewRGBA(r)
+	for i := range rgba.Pix {
+		rgba.Pix[i] = uint8(i * 7)
+	}
+	for _, img := range []image.Image{ycc, rgba} {
+		fast, slow := scaleDown(img, 64), scaleDown(opaque{img}, 64)
+		if fast.Bounds() != slow.Bounds() {
+			t.Fatalf("%T: bounds %v vs %v", img, fast.Bounds(), slow.Bounds())
+		}
+		for i := range fast.Pix {
+			if d := int(fast.Pix[i]) - int(slow.Pix[i]); d < -2 || d > 2 {
+				t.Fatalf("%T: pixel byte %d = %d, generic %d", img, i, fast.Pix[i], slow.Pix[i])
+			}
+		}
 	}
 }
 

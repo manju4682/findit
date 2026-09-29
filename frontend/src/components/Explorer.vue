@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, reactive, ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import FolderTree from './FolderTree.vue'
 import Hint from './Hint.vue'
 import FileThumb from './FileThumb.vue'
@@ -45,6 +45,73 @@ const files = computed(() => currentFilesFiltered())
 const summary = computed(() => (src.value ? sourceSummary(src.value) : { total: 0, recoverable: 0, nameOnly: 0 }))
 const conf = computed(() => (src.value ? recoverConfidence(src.value) : null))
 const selCount = computed(() => selectedIds().length)
+
+// Windowed rendering: a raw source can hold 100k+ files, so only the rows near
+// the viewport are mounted. Rows have fixed heights (ROW_H) so positions can be
+// computed; spacers above and below keep the scrollbar honest.
+const ROW_H = { grid: 164, list: 34, details: 32 } // px, including the gap
+const TILE_MIN = 128 // matches minmax(128px,1fr) in the grid template
+const GAP = 8 // gap-2
+const OVERSCAN = 3 // extra rows above/below the viewport
+
+const scroller = ref(null)
+const filesEl = ref(null)
+const view = reactive({ top: 0, height: 0, width: 0, filesTop: 0 })
+
+function measure() {
+  const s = scroller.value
+  if (!s) return
+  view.top = s.scrollTop
+  view.height = s.clientHeight
+  const f = filesEl.value
+  if (f) {
+    view.filesTop = f.getBoundingClientRect().top - s.getBoundingClientRect().top + s.scrollTop
+    view.width = f.clientWidth
+  }
+}
+let frame = 0
+function onScroll() {
+  cancelAnimationFrame(frame)
+  frame = requestAnimationFrame(measure)
+}
+
+const cols = computed(() =>
+  store.viewMode === 'grid' ? Math.max(1, Math.floor((view.width + GAP) / (TILE_MIN + GAP))) : 1,
+)
+const win = computed(() => {
+  const rowH = ROW_H[store.viewMode] || ROW_H.list
+  const rows = Math.ceil(files.value.length / cols.value)
+  const rel = view.top - view.filesTop
+  const first = Math.min(rows, Math.max(0, Math.floor(rel / rowH) - OVERSCAN))
+  const last = Math.min(rows, Math.max(first, Math.ceil((rel + view.height) / rowH) + OVERSCAN))
+  return {
+    files: files.value.slice(first * cols.value, last * cols.value),
+    padTop: first * rowH,
+    padBottom: (rows - last) * rowH,
+  }
+})
+
+// Start at the top whenever the list changes identity (folder, filter, view, source).
+watch(
+  () => [store.activeSourceId, store.currentFolder, store.statusFilter, store.viewMode],
+  async () => {
+    if (scroller.value) scroller.value.scrollTop = 0
+    await nextTick()
+    measure()
+  },
+)
+watch(() => folders.value.length, () => nextTick(measure))
+
+let resizeObserver
+onMounted(() => {
+  resizeObserver = new ResizeObserver(measure)
+  resizeObserver.observe(scroller.value)
+  measure()
+})
+onBeforeUnmount(() => {
+  cancelAnimationFrame(frame)
+  resizeObserver?.disconnect()
+})
 
 // Resizable side panels. Widths persist across sessions; double-clicking a
 // divider resets it to the default.
@@ -233,113 +300,128 @@ const resizePreview = (d) => (previewWidth.value = clamp(previewWidth.value - d,
       />
 
       <!-- Center: contents -->
-      <section class="flex-1 overflow-auto p-4">
+      <section ref="scroller" class="flex-1 overflow-auto p-4" @scroll="onScroll">
         <div class="flex items-center gap-2 mb-3 text-xs text-slate-500">
           <button class="px-2 py-1 bg-slate-100 rounded-md hover:bg-slate-200" @click="selectAllCurrent">Select all</button>
           <span>{{ folders.length }} folder{{ folders.length === 1 ? '' : 's' }}, {{ files.length }} file{{ files.length === 1 ? '' : 's' }}</span>
         </div>
 
         <!-- GRID -->
-        <div v-if="store.viewMode === 'grid'" class="grid grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-2">
-          <button
-            v-for="(f, i) in folders"
-            :key="'d' + i"
-            class="flex flex-col items-center p-3 rounded-xl hover:bg-slate-100 transition"
-            @dblclick="openFolder(f)"
-            @click="openFolder(f)"
-          >
-            <div class="text-5xl leading-none">📁</div>
-            <div class="text-xs text-center truncate w-full mt-1.5 text-slate-700">{{ folderLabel(f.name) }}</div>
-          </button>
+        <template v-if="store.viewMode === 'grid'">
+          <div v-if="folders.length" class="grid grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-2 mb-2">
+            <button
+              v-for="(f, i) in folders"
+              :key="'d' + i"
+              class="flex flex-col items-center p-3 rounded-xl hover:bg-slate-100 transition"
+              @dblclick="openFolder(f)"
+              @click="openFolder(f)"
+            >
+              <div class="text-5xl leading-none">📁</div>
+              <div class="text-xs text-center truncate w-full mt-1.5 text-slate-700">{{ folderLabel(f.name) }}</div>
+            </button>
+          </div>
 
-          <div
-            v-for="f in files"
-            :key="f.id"
-            class="group relative flex flex-col items-center p-2.5 rounded-xl cursor-pointer ring-1 transition"
-            :class="isSelected(f.id) ? 'ring-blue-400 bg-blue-50' : 'ring-transparent hover:bg-slate-100'"
-            @click="openFile(f)"
-          >
-            <input
-              type="checkbox"
-              class="absolute top-1.5 left-1.5 opacity-0 group-hover:opacity-100"
-              :class="isSelected(f.id) ? 'opacity-100' : ''"
-              :checked="isSelected(f.id)"
-              :disabled="!f.recoverable"
-              @click.stop
-              @change="toggleFile(f.id)"
-            />
-            <FileThumb :file="f" />
-            <div class="text-xs text-center truncate w-full mt-1.5" :class="f.deleted ? 'text-slate-400 line-through' : 'text-slate-700'">
-              {{ f.name }}
-            </div>
-            <div class="text-[10px] text-slate-400 flex items-center gap-1">
-              {{ fmtSize(f.size) }}
-              <Hint :text="statusInfo(f.assessment?.status).tip">
-                <span class="w-2 h-2 rounded-full inline-block cursor-help" :class="statusInfo(f.assessment?.status).dot"></span>
-              </Hint>
+          <div ref="filesEl" :style="{ paddingTop: win.padTop + 'px', paddingBottom: win.padBottom + 'px' }">
+            <div class="grid grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-2">
+              <div
+                v-for="f in win.files"
+                :key="f.id"
+                class="group relative h-[156px] overflow-hidden flex flex-col items-center p-2.5 rounded-xl cursor-pointer ring-1 transition"
+                :class="isSelected(f.id) ? 'ring-blue-400 bg-blue-50' : 'ring-transparent hover:bg-slate-100'"
+                @click="openFile(f)"
+              >
+                <input
+                  type="checkbox"
+                  class="absolute top-1.5 left-1.5 opacity-0 group-hover:opacity-100"
+                  :class="isSelected(f.id) ? 'opacity-100' : ''"
+                  :checked="isSelected(f.id)"
+                  :disabled="!f.recoverable"
+                  @click.stop
+                  @change="toggleFile(f.id)"
+                />
+                <FileThumb :file="f" />
+                <div class="text-xs text-center truncate w-full mt-1.5" :class="f.deleted ? 'text-slate-400 line-through' : 'text-slate-700'">
+                  {{ f.name }}
+                </div>
+                <div class="text-[10px] text-slate-400 flex items-center gap-1">
+                  {{ fmtSize(f.size) }}
+                  <Hint :text="statusInfo(f.assessment?.status).tip">
+                    <span class="w-2 h-2 rounded-full inline-block cursor-help" :class="statusInfo(f.assessment?.status).dot"></span>
+                  </Hint>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
+        </template>
 
         <!-- LIST -->
-        <div v-else-if="store.viewMode === 'list'" class="space-y-0.5">
-          <button
-            v-for="(f, i) in folders"
-            :key="'d' + i"
-            class="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-100 text-sm text-left"
-            @click="openFolder(f)"
-          ><span>📁</span><span class="truncate">{{ folderLabel(f.name) }}</span></button>
-          <div
-            v-for="f in files"
-            :key="f.id"
-            class="flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm cursor-pointer"
-            :class="isSelected(f.id) ? 'bg-blue-50' : 'hover:bg-slate-100'"
-            @click="openFile(f)"
-          >
-            <input type="checkbox" :checked="isSelected(f.id)" :disabled="!f.recoverable" @click.stop @change="toggleFile(f.id)" />
-            <span>{{ iconFor(f.ext) }}</span>
-            <span class="flex-1 truncate" :class="f.deleted ? 'text-slate-400 line-through' : ''">{{ f.name }}</span>
-            <span class="text-xs text-slate-400">{{ fmtSize(f.size) }}</span>
-            <Hint :text="statusInfo(f.assessment?.status).tip">
-              <span class="text-[11px] flex items-center gap-1 cursor-help" :class="statusInfo(f.assessment?.status).text">
-                <span class="w-2 h-2 rounded-full" :class="statusInfo(f.assessment?.status).dot"></span>
-                {{ statusInfo(f.assessment?.status).label }}
-              </span>
-            </Hint>
+        <template v-else-if="store.viewMode === 'list'">
+          <div v-if="folders.length" class="flex flex-col gap-0.5 mb-0.5">
+            <button
+              v-for="(f, i) in folders"
+              :key="'d' + i"
+              class="w-full flex items-center gap-2 px-2 h-8 rounded-lg hover:bg-slate-100 text-sm text-left"
+              @click="openFolder(f)"
+            ><span>📁</span><span class="truncate">{{ folderLabel(f.name) }}</span></button>
           </div>
-        </div>
+          <div ref="filesEl" :style="{ paddingTop: win.padTop + 'px', paddingBottom: win.padBottom + 'px' }">
+            <div class="flex flex-col gap-0.5">
+              <div
+                v-for="f in win.files"
+                :key="f.id"
+                class="flex items-center gap-2 px-2 h-8 shrink-0 rounded-lg text-sm cursor-pointer"
+                :class="isSelected(f.id) ? 'bg-blue-50' : 'hover:bg-slate-100'"
+                @click="openFile(f)"
+              >
+                <input type="checkbox" :checked="isSelected(f.id)" :disabled="!f.recoverable" @click.stop @change="toggleFile(f.id)" />
+                <span>{{ iconFor(f.ext) }}</span>
+                <span class="flex-1 truncate" :class="f.deleted ? 'text-slate-400 line-through' : ''">{{ f.name }}</span>
+                <span class="text-xs text-slate-400">{{ fmtSize(f.size) }}</span>
+                <Hint :text="statusInfo(f.assessment?.status).tip">
+                  <span class="text-[11px] flex items-center gap-1 cursor-help" :class="statusInfo(f.assessment?.status).text">
+                    <span class="w-2 h-2 rounded-full" :class="statusInfo(f.assessment?.status).dot"></span>
+                    {{ statusInfo(f.assessment?.status).label }}
+                  </span>
+                </Hint>
+              </div>
+            </div>
+          </div>
+        </template>
 
         <!-- DETAILS -->
-        <table v-else class="w-full text-sm">
+        <table v-else class="w-full text-sm table-fixed">
           <thead class="text-xs text-slate-400 border-b">
             <tr>
-              <th class="w-6"></th>
+              <th class="w-8"></th>
               <th class="text-left py-1.5">Name</th>
-              <th class="text-left">Type</th>
-              <th class="text-right">Size</th>
-              <th class="text-left pl-3">Status</th>
+              <th class="text-left w-20">Type</th>
+              <th class="text-right w-24">Size</th>
+              <th class="text-left pl-3 w-32">Status</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(f, i) in folders" :key="'d' + i" class="hover:bg-slate-100 cursor-pointer" @click="openFolder(f)">
+            <tr v-for="(f, i) in folders" :key="'d' + i" class="h-8 hover:bg-slate-100 cursor-pointer" @click="openFolder(f)">
               <td></td>
-              <td class="py-1.5">📁 {{ folderLabel(f.name) }}</td>
+              <td class="truncate">📁 {{ folderLabel(f.name) }}</td>
               <td class="text-slate-400">Folder</td>
               <td></td>
               <td></td>
             </tr>
+            <tr ref="filesEl" aria-hidden="true">
+              <td colspan="5" class="p-0" :style="{ height: win.padTop + 'px' }"></td>
+            </tr>
             <tr
-              v-for="f in files"
+              v-for="f in win.files"
               :key="f.id"
-              class="cursor-pointer"
+              class="h-8 cursor-pointer"
               :class="isSelected(f.id) ? 'bg-blue-50' : 'hover:bg-slate-100'"
               @click="openFile(f)"
             >
               <td class="text-center">
                 <input type="checkbox" :checked="isSelected(f.id)" :disabled="!f.recoverable" @click.stop @change="toggleFile(f.id)" />
               </td>
-              <td class="py-1.5" :class="f.deleted ? 'text-slate-400 line-through' : ''">{{ iconFor(f.ext) }} {{ f.name }}</td>
-              <td class="text-slate-400 uppercase text-xs">{{ f.ext || '—' }}</td>
+              <td class="truncate" :class="f.deleted ? 'text-slate-400 line-through' : ''" :title="f.name">{{ iconFor(f.ext) }} {{ f.name }}</td>
+              <td class="text-slate-400 uppercase text-xs truncate">{{ f.ext || '—' }}</td>
               <td class="text-right text-slate-500">{{ fmtSize(f.size) }}</td>
               <td class="pl-3">
                 <Hint :text="statusInfo(f.assessment?.status).tip">
@@ -349,6 +431,9 @@ const resizePreview = (d) => (previewWidth.value = clamp(previewWidth.value - d,
                   </span>
                 </Hint>
               </td>
+            </tr>
+            <tr aria-hidden="true">
+              <td colspan="5" class="p-0" :style="{ height: win.padBottom + 'px' }"></td>
             </tr>
           </tbody>
         </table>

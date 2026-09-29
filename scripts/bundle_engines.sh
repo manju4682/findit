@@ -22,6 +22,18 @@ mkdir -p "$DEST/bin" "$DEST/lib"
 is_system() { case "$1" in /usr/lib/*|/System/*) return 0 ;; *) return 1 ;; esac; }
 
 declare -a QUEUE=()
+PKG_DIRS="" # newline-separated Homebrew keg dirs we vendored from (bash 3.2: no assoc arrays)
+
+# note_pkg records the Homebrew keg (…/Cellar/<pkg>/<version>) a file came from,
+# so its license files can be shipped alongside it.
+note_pkg() {
+  local real dir
+  real="$(realpath "$1" 2>/dev/null || echo "$1")"
+  case "$real" in */Cellar/*/*/*) ;; *) return 0 ;; esac
+  dir="$(echo "$real" | sed -E 's#(.*/Cellar/[^/]+/[^/]+)/.*#\1#')"
+  case $'\n'"$PKG_DIRS" in *$'\n'"$dir"$'\n'*) return 0 ;; esac
+  PKG_DIRS+="$dir"$'\n'
+}
 
 # rewrite fixes one Mach-O file's dylib references to point at vendored libs,
 # copying and queueing any non-system dependency it discovers.
@@ -44,6 +56,7 @@ rewrite() {
       cp -L "$dep" "$DEST/lib/$base"
       chmod u+w "$DEST/lib/$base"
       QUEUE+=("$DEST/lib/$base")
+      note_pkg "$dep"
     fi
     install_name_tool -change "$dep" "$prefix/$base" "$file" 2>/dev/null || true
   done < <(otool -L "$file" | tail -n +2 | awk '{print $1}')
@@ -55,6 +68,7 @@ for b in "${BINS[@]}"; do
   cp "$src" "$DEST/bin/$b"
   chmod u+w "$DEST/bin/$b"
   QUEUE+=("$DEST/bin/$b")
+  note_pkg "$src"
 done
 
 echo "==> Vendoring dylibs and rewriting load paths"
@@ -65,8 +79,20 @@ while ((i < ${#QUEUE[@]})); do
   rewrite "$f"
 done
 
+echo "==> Collecting third-party license files"
+mkdir -p "$DEST/licenses"
+while read -r dir; do
+  [[ -z "$dir" ]] && continue
+  pkg="$(basename "$(dirname "$dir")")-$(basename "$dir")"
+  mkdir -p "$DEST/licenses/$pkg"
+  find "$dir" -maxdepth 1 -type f \( -iname 'LICEN[CS]E*' -o -iname 'COPYING*' -o -iname 'NOTICE*' -o -name 'sbom.spdx.json' \) \
+    -exec cp {} "$DEST/licenses/$pkg/" \;
+  echo "  $pkg"
+done <<< "$PKG_DIRS"
+cp "$(dirname "$0")/../THIRD_PARTY_NOTICES.md" "$DEST/licenses/"
+
 echo "==> Ad-hoc signing (required on Apple Silicon after rewriting)"
-find "$DEST/bin" "$DEST/lib" -type f -exec codesign --force --sign - {} \; 2>/dev/null || true
+find "$DEST/bin" "$DEST/lib" -type f -exec codesign --force --sign - {} \;
 
 echo "==> Verifying self-containment (no /opt or Homebrew paths should remain)"
 leak=0

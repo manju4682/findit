@@ -10,12 +10,15 @@ let observer
 
 onMounted(() => {
   if (!previewable(props.file.ext)) return
-  observer = new IntersectionObserver((entries) => {
-    if (entries[0].isIntersecting) {
-      loadPreview(props.file)
-      observer.disconnect()
-    }
-  })
+  observer = new IntersectionObserver(
+    (entries) => {
+      if (entries[0].isIntersecting) {
+        loadPreview(props.file)
+        observer.disconnect()
+      }
+    },
+    { rootMargin: '300px' }, // start loading just before the thumbnail scrolls into view
+  )
   observer.observe(el.value)
 })
 onBeforeUnmount(() => observer && observer.disconnect())

@@ -8,12 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/findit/findit/internal/model"
-	"github.com/findit/findit/internal/storage"
+	"github.com/manju4682/findit/internal/model"
+	"github.com/manju4682/findit/internal/storage"
 )
 
 // Request describes an extraction: which files to write, where, and how.
@@ -24,10 +25,6 @@ type Request struct {
 	// ProtectSourcePath, when set, refuses a destination equal to the source
 	// image/device path.
 	ProtectSourcePath string
-	// ProtectDevicePath, when set, makes extraction refuse a destination on the
-	// same physical device as this path (used for live-device recovery so we
-	// never overwrite not-yet-recovered data). Empty for image-based recovery.
-	ProtectDevicePath string
 }
 
 // Opener yields a file's bytes. It abstracts over the two recovery paths: raw
@@ -118,12 +115,6 @@ func prepareDest(req Request) (string, error) {
 	if !fi.IsDir() {
 		return "", fmt.Errorf("extract: destination %q is not a directory", destRoot)
 	}
-	if req.ProtectDevicePath != "" {
-		same, err := sameDevice(destRoot, req.ProtectDevicePath)
-		if err == nil && same {
-			return "", fmt.Errorf("extract: destination is on the same device being recovered; choose another drive")
-		}
-	}
 	return destRoot, nil
 }
 
@@ -145,17 +136,36 @@ func writeOne(ctx context.Context, open Opener, destRoot string, preservePaths b
 	}
 	defer rc.Close()
 
-	out, err := os.Create(clean)
+	out, path, err := createUnique(clean)
 	if err != nil {
 		return "", 0, err
 	}
-	defer out.Close()
-
 	n, err := io.Copy(out, rc)
-	if err != nil {
-		return clean, n, err
+	if cerr := out.Close(); err == nil {
+		err = cerr
 	}
-	return clean, n, nil
+	return path, n, err
+}
+
+// createUnique creates path exclusively, falling back to "name (2).ext",
+// "name (3).ext", … so files that share a name never overwrite each other.
+func createUnique(path string) (*os.File, string, error) {
+	ext := filepath.Ext(path)
+	base := strings.TrimSuffix(path, ext)
+	for i := 1; i <= 9999; i++ {
+		p := path
+		if i > 1 {
+			p = fmt.Sprintf("%s (%d)%s", base, i, ext)
+		}
+		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err == nil {
+			return f, p, nil
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return nil, "", err
+		}
+	}
+	return nil, "", fmt.Errorf("extract: too many files named %q", filepath.Base(path))
 }
 
 // relPath computes the destination-relative path for a file, sanitized so it

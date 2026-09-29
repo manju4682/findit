@@ -9,8 +9,10 @@ testdata/fixtures/*.bin
 testdata/fixtures/*.map
 testdata/fixtures/*.dmg
 
-# Build output
-/build/
+# Build output (build/darwin and build/appicon.png are source and stay tracked)
+/build/bin/
+/build/engines/
+/build/*.dmg
 
 # Wails frontend
 frontend/node_modules/

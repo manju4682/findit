@@ -9,6 +9,8 @@ import {
   StartScan,
   StartScanDevice,
   StartClone,
+  CancelClone,
+  CancelScan,
   DetectPartitions,
   Preview,
   Recover,
@@ -17,11 +19,12 @@ import {
   SupportedRawTypes,
 } from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
-import { folderLabel, sourceLabel } from './utils'
+import { fmtSize, folderLabel, sourceLabel } from './utils'
 
 export const store = reactive({
   step: 'source', // source | clone | scan | scanning | results
   error: '',
+  notice: '', // non-fatal warning, e.g. a clone with unreadable areas
 
   // source selection
   devices: [],
@@ -48,6 +51,8 @@ export const store = reactive({
 
   // scanning
   progress: [],
+  scanStatus: '',
+  scanPct: 0,
 
   // results
   diagnosis: null,
@@ -149,6 +154,7 @@ export async function startClone() {
   store.cloning = true
   store.cloneStatus = ''
   store.error = ''
+  store.notice = ''
   try {
     await StartClone(dev.id, dest)
   } catch (e) {
@@ -159,6 +165,17 @@ export async function startClone() {
 
 export function skipClone() {
   store.step = 'scan'
+}
+
+// cancelClone aborts an in-progress clone; the backend cleans up the partial
+// image and emits clone:canceled.
+export async function cancelClone() {
+  store.cloneStatus = 'Canceling…'
+  try {
+    await CancelClone()
+  } catch (e) {
+    /* ignore */
+  }
 }
 
 // ---- scan -------------------------------------------------------------------
@@ -197,11 +214,13 @@ export function scanPartitionOffsets() {
 export async function startScan() {
   store.error = ''
   store.progress = []
+  store.scanStatus = ''
+  store.scanPct = 0
   store.sources = []
   store.diagnosis = null
   store.activeSourceId = ''
   store.recoverResult = null
-  store.previews = {}
+  resetPreviews()
   for (const k of Object.keys(store.selected)) delete store.selected[k]
   store.step = 'scanning'
 
@@ -217,6 +236,15 @@ export async function startScan() {
   } catch (e) {
     store.error = String(e)
     store.step = 'scan'
+  }
+}
+
+// cancelScan stops an in-progress scan; the backend emits scan:canceled.
+export async function cancelScan() {
+  try {
+    await CancelScan()
+  } catch (e) {
+    /* ignore */
   }
 }
 
@@ -308,15 +336,41 @@ export function clearSelection() {
   if (m) for (const k of Object.keys(m)) delete m[k]
 }
 
-export async function loadPreview(file) {
-  if (!file || store.previews[file.id]) return store.previews[file.id]
-  try {
-    const p = await Preview(store.activeSourceId, file.id)
-    store.previews[file.id] = p
-    return p
-  } catch (e) {
-    return null
-  }
+// Thumbnails are cached up to PREVIEW_CACHE_MAX (oldest evicted first), so
+// browsing a huge source doesn't grow memory without bound. Each scan bumps
+// previewGen so late replies from the previous scan are dropped.
+const PREVIEW_CACHE_MAX = 400
+const previewOrder = []
+const previewInflight = new Map()
+let previewGen = 0
+
+export function loadPreview(file) {
+  if (!file) return null
+  if (store.previews[file.id]) return store.previews[file.id]
+  if (previewInflight.has(file.id)) return previewInflight.get(file.id)
+  const gen = previewGen
+  const req = Preview(file.sourceId || store.activeSourceId, file.id)
+    .then((p) => {
+      if (gen !== previewGen) return null
+      store.previews[file.id] = p
+      previewOrder.push(file.id)
+      while (previewOrder.length > PREVIEW_CACHE_MAX) {
+        const old = previewOrder.shift()
+        if (old !== store.selectedFile?.id) delete store.previews[old]
+      }
+      return p
+    })
+    .catch(() => null)
+    .finally(() => previewInflight.delete(file.id))
+  previewInflight.set(file.id, req)
+  return req
+}
+
+function resetPreviews() {
+  previewGen++
+  previewOrder.length = 0
+  previewInflight.clear()
+  store.previews = {}
 }
 
 // currentFilesFiltered applies the status filter to the current folder's files.
@@ -375,11 +429,13 @@ export async function openFullDiskAccess() {
   try {
     await OpenFullDiskAccessSettings()
   } catch (e) {
-    /* ignore */
+    store.error = String(e)
   }
 }
 
 export function reset() {
+  if (store.cloning) cancelClone()
+  if (store.step === 'scanning') cancelScan()
   store.step = 'source'
   store.sourceKind = ''
   store.selectedDeviceId = ''
@@ -391,6 +447,8 @@ export function reset() {
   store.activeSourceId = ''
   store.recoverResult = null
   store.error = ''
+  store.notice = ''
+  resetPreviews()
 }
 
 // ---- init -------------------------------------------------------------------
@@ -403,25 +461,35 @@ export async function initStore() {
   try {
     store.allRawTypes = (await SupportedRawTypes()) || []
     for (const t of store.allRawTypes)
-      store.rawSelected[t] = ['jpg', 'png', 'mp4', 'pdf'].includes(t)
+      store.rawSelected[t] = ['jpg', 'png', 'mp4', 'pdf', 'zip'].includes(t)
   } catch (e) {
     /* bindings may be missing in bare preview */
   }
 
   EventsOn('scan:progress', (e) => {
-    if (e && e.message) store.progress.push(e.message)
-  })
-  EventsOn('scan:source', (s) => {
-    if (s && !store.sources.find((x) => x.id === s.id)) store.sources.push(s)
+    // Continuous byte progress updates one live line; discrete messages
+    // (the diagnosis summary, “Assembling files…”, per-source results) append.
+    if (e && e.total > 0) {
+      if (e.message) store.scanStatus = e.message
+      store.scanPct = Math.min(100, Math.round((e.done / e.total) * 100))
+    } else if (e && e.message) {
+      store.progress.push(e.message)
+    }
   })
   EventsOn('scan:done', (done) => {
     store.diagnosis = done?.diagnosis || null
-    if (done?.result?.sources) store.sources = done.result.sources
+    store.sources = done?.result?.sources || []
     if (store.sources.length) setActiveSource(store.sources[0].id)
     store.step = 'results'
   })
   EventsOn('scan:error', (msg) => {
     store.error = msg || 'Scan failed'
+    store.step = 'scan'
+  })
+  EventsOn('scan:canceled', () => {
+    store.progress = []
+    store.scanStatus = ''
+    store.scanPct = 0
     store.step = 'scan'
   })
 
@@ -437,11 +505,19 @@ export async function initStore() {
     store.imagePath = e?.path || ''
     store.sourceKind = 'image'
     store.step = 'scan'
+    if (e?.unreadableBytes > 0) {
+      store.notice = `The copy finished, but ${fmtSize(e.unreadableBytes)} of the drive couldn’t be read and was filled with zeros. Files stored there may be damaged.`
+    }
     detectPartitions()
   })
   EventsOn('clone:error', (msg) => {
     store.cloning = false
     store.error = msg || 'Clone failed'
+  })
+  EventsOn('clone:canceled', () => {
+    store.cloning = false
+    store.clonePct = 0
+    store.cloneStatus = ''
   })
 
   await loadDevices()

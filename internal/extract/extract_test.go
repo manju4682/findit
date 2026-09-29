@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/findit/findit/internal/carve"
-	"github.com/findit/findit/internal/model"
-	"github.com/findit/findit/internal/storage"
-	"github.com/findit/findit/internal/testutil"
+	"github.com/manju4682/findit/internal/carve"
+	"github.com/manju4682/findit/internal/model"
+	"github.com/manju4682/findit/internal/storage"
+	"github.com/manju4682/findit/internal/testutil"
 )
 
 func fixture(t *testing.T) storage.Source {
@@ -98,16 +98,29 @@ func TestExtract_WritesAndPreservesPaths(t *testing.T) {
 	}
 }
 
-func TestExtract_RejectsSameDeviceDestination(t *testing.T) {
+func TestExtract_KeepsFilesWithSameName(t *testing.T) {
 	src := fixture(t)
+	files := carvedFiles(t, src, "jpg", 2)
+	for i := range files {
+		files[i].Name = "IMG_0001.jpg"
+	}
 	dest := t.TempDir()
-	_, err := Extract(context.Background(), ExtentOpener(src), Request{
-		Files:             carvedFiles(t, src, "jpg", 1),
-		DestDir:           dest,
-		ProtectDevicePath: dest, // dest is trivially on the same device as itself
-	}, nil)
-	if err == nil {
-		t.Fatal("expected same-device destination to be rejected")
+
+	res, err := Extract(context.Background(), ExtentOpener(src), Request{Files: files, DestDir: dest}, nil)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	if res.Written != 2 {
+		t.Fatalf("written = %d, want 2", res.Written)
+	}
+	want := []string{filepath.Join(dest, "IMG_0001.jpg"), filepath.Join(dest, "IMG_0001 (2).jpg")}
+	for i, it := range res.Items {
+		if it.Path != want[i] {
+			t.Errorf("item %d path = %q, want %q", i, it.Path, want[i])
+		}
+		if fi, err := os.Stat(it.Path); err != nil || fi.Size() != it.File.Size {
+			t.Errorf("item %d: stat %v, size mismatch", i, err)
+		}
 	}
 }
 

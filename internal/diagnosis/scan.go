@@ -5,12 +5,10 @@ package diagnosis
 
 import (
 	"bytes"
-	"io"
 	"strings"
 
-	"github.com/findit/findit/internal/bytescan"
-	"github.com/findit/findit/internal/config"
-	"github.com/findit/findit/internal/model"
+	"github.com/manju4682/findit/internal/bytescan"
+	"github.com/manju4682/findit/internal/model"
 )
 
 const sectorSize = 512
@@ -67,32 +65,33 @@ func identifyBoot(b []byte) (model.FSType, string) {
 	return model.FSUnknown, ""
 }
 
+// hits counts signature matches, remembering only the first offset; a large
+// NTFS drive has millions of MFT records and only the count matters.
+type hits struct {
+	count int
+	first int64
+}
+
+func (h *hits) add(off int64) {
+	if h.count == 0 {
+		h.first = off
+	}
+	h.count++
+}
+
 // scanResult accumulates raw findings from the streaming pass.
 type scanResult struct {
 	boot     []model.Evidence
-	typeHits map[model.FSType][]int64
-	mftHits  []int64
+	typeHits map[model.FSType]*hits
+	mftHits  hits
 	carve    map[string]int
 }
 
-// scan performs one streaming pass over r. curType is the current filesystem,
-// excluded from candidate evidence so the drive's own structures aren't
-// reported as a "previous" filesystem.
-func scan(r io.Reader, curType model.FSType) (*scanResult, error) {
-	res := &scanResult{
-		typeHits: map[model.FSType][]int64{},
+func newScanResult() *scanResult {
+	return &scanResult{
+		typeHits: map[model.FSType]*hits{},
 		carve:    map[string]int{"jpg": 0, "png": 0, "mp4": 0},
 	}
-	// overlap must exceed one sector so the aligned boot-sector probe can read a
-	// full 512-byte sector starting anywhere within the owned region.
-	overlap := config.Get().Diagnosis.ScanOverlapBytes
-	err := bytescan.Scan(r, overlap, func(win []byte, base int64, safe int) {
-		scanWindow(res, win, safe, base, curType)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
 }
 
 // scanWindow processes window[:end], reporting absolute offsets as base+pos.
@@ -108,12 +107,17 @@ func scanWindow(res *scanResult, window []byte, end int, base int64, curType mod
 			continue
 		}
 		for _, p := range bytescan.IndexAll(region, sig) {
-			res.typeHits[fsType] = append(res.typeHits[fsType], base+int64(p))
+			h := res.typeHits[fsType]
+			if h == nil {
+				h = &hits{}
+				res.typeHits[fsType] = h
+			}
+			h.add(base + int64(p))
 		}
 	}
 
 	for _, p := range bytescan.IndexAll(region, sigMFT) {
-		res.mftHits = append(res.mftHits, base+int64(p))
+		res.mftHits.add(base + int64(p))
 	}
 
 	// Aligned boot-sector probe: a valid boot sector ends with 0x55AA.

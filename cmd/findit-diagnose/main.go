@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/findit/findit/internal/diagnosis"
-	"github.com/findit/findit/internal/model"
+	"github.com/manju4682/findit/internal/diagnosis"
+	"github.com/manju4682/findit/internal/model"
 )
 
 func main() {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"math/rand"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -55,18 +56,41 @@ func TestList_Runs(t *testing.T) {
 	t.Logf("found %d device(s)", len(devs))
 }
 
-func TestFormatDeviceOpenError_ProvidesFullDiskAccessHint(t *testing.T) {
+func TestFormatDeviceOpenError_ProvidesAdminHint(t *testing.T) {
 	msg := formatDeviceOpenError("/dev/rdisk4", errors.New("open /dev/rdisk4: operation not permitted"))
-	for _, want := range []string{"Full Disk Access", "Privacy & Security", "/dev/rdisk4"} {
+	for _, want := range []string{"administrator privileges", "Full Disk Access", "safe copy", "/dev/rdisk4"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("message %q does not contain %q", msg, want)
 		}
 	}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
+// TestCheckImageDestination uses the volume holding the temp dir as the
+// "source" drive to exercise the same-disk and free-space guards.
+func TestCheckImageDestination(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("volume lookup only implemented on darwin")
 	}
-	return b
+	dir := t.TempDir()
+	v, err := VolumeOf(filepath.Join(dir, "not", "yet", "created"))
+	if err != nil {
+		t.Fatalf("VolumeOf: %v", err)
+	}
+	if v.Disk == "" || v.FSType == "" || v.Free <= 0 {
+		t.Fatalf("incomplete volume info: %+v", v)
+	}
+	dest := filepath.Join(dir, "copy.bin")
+
+	if err := CheckImageDestination("copy.bin", Device{ID: "disk999", Size: 1}); err == nil {
+		t.Error("relative destination accepted")
+	}
+	if err := CheckImageDestination(dest, Device{ID: v.Disk, Size: 1}); err == nil {
+		t.Error("destination on the source disk accepted")
+	}
+	if err := CheckImageDestination(dest, Device{ID: "disk999", Size: v.Free * 4}); err == nil || !strings.Contains(err.Error(), "free space") {
+		t.Errorf("oversized image err = %v, want free-space error", err)
+	}
+	if err := CheckImageDestination(dest, Device{ID: "disk999", Size: 1 << 20}); err != nil {
+		t.Errorf("valid destination rejected: %v", err)
+	}
 }

@@ -5,6 +5,7 @@ package imaging
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,9 +13,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/findit/findit/internal/jobs"
-	"github.com/findit/findit/internal/storage"
+	"github.com/manju4682/findit/internal/jobs"
+	"github.com/manju4682/findit/internal/storage"
 )
+
+// ErrCanceled is returned when a cancel sentinel appears mid-copy.
+var ErrCanceled = errors.New("imaging: canceled")
 
 // ErrorPolicy decides what happens when a source block cannot be read.
 type ErrorPolicy int
@@ -45,6 +49,10 @@ type Options struct {
 	BlockSize        int
 	OnReadError      ErrorPolicy
 	ProgressInterval time.Duration
+	// CancelPath, when set, is polled each block; if the file appears, the copy
+	// aborts with ErrCanceled. This lets a separate (privileged) process be
+	// stopped cooperatively without killing it.
+	CancelPath string
 }
 
 // Job is a running imaging operation: a Job plus its Result once finished.
@@ -87,7 +95,8 @@ func Image(parent context.Context, src storage.Source, destPath string, opts Opt
 
 	j := &Job{}
 	j.Job = jobs.Run(parent, 32, func(ctx context.Context, emit func(jobs.Event)) error {
-		out, err := os.Create(destPath)
+		// 0600: a drive image holds everything on the drive, so only its owner may read it.
+		out, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|oNoFollow, 0o600)
 		if err != nil {
 			return fmt.Errorf("imaging: creating destination: %w", err)
 		}
@@ -107,6 +116,9 @@ func Image(parent context.Context, src storage.Source, destPath string, opts Opt
 			if err := ctx.Err(); err != nil {
 				return err
 			}
+			if opts.CancelPath != "" && fileExists(opts.CancelPath) {
+				return ErrCanceled
+			}
 			want := bs
 			if off+int64(want) > size {
 				want = int(size - off)
@@ -118,13 +130,12 @@ func Image(parent context.Context, src storage.Source, destPath string, opts Opt
 				if opts.OnReadError == Abort {
 					return fmt.Errorf("imaging: read error at offset %d: %w", off, rerr)
 				}
-				for i := 0; i < want; i++ {
-					buf[i] = 0
-				}
+				storage.Salvage(src, buf[:want], off, func(o, l int64) {
+					bad = appendRegion(bad, o, l)
+					emit(jobs.Event{Kind: jobs.KindLog, Phase: "image",
+						Message: fmt.Sprintf("Unreadable area at %d (%d bytes) — filled with zeros and continuing.", o, l)})
+				})
 				eff = want
-				bad = appendRegion(bad, off, int64(want))
-				emit(jobs.Event{Kind: jobs.KindLog, Phase: "image",
-					Message: fmt.Sprintf("Unreadable area at %d (%d bytes) — filled with zeros and continuing.", off, want)})
 			}
 			if eff == 0 {
 				break
@@ -145,6 +156,9 @@ func Image(parent context.Context, src storage.Source, destPath string, opts Opt
 		}
 
 		emitProgress(emit, copied, size, start)
+		if err := out.Sync(); err != nil {
+			return fmt.Errorf("imaging: flushing destination: %w", err)
+		}
 		j.setResult(Result{DestPath: destPath, BytesCopied: copied, BadRegions: bad})
 		return nil
 	})
@@ -172,4 +186,9 @@ func appendRegion(regions []Region, off, length int64) []Region {
 		return regions
 	}
 	return append(regions, Region{Offset: off, Length: length})
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }

@@ -6,16 +6,17 @@ package recovery
 
 import (
 	"context"
+	"errors"
 	"io"
 
-	"github.com/findit/findit/internal/device"
-	"github.com/findit/findit/internal/engines/tsk"
-	"github.com/findit/findit/internal/extract"
-	"github.com/findit/findit/internal/imaging"
-	"github.com/findit/findit/internal/model"
-	"github.com/findit/findit/internal/preview"
-	"github.com/findit/findit/internal/session"
-	"github.com/findit/findit/internal/storage"
+	"github.com/manju4682/findit/internal/device"
+	"github.com/manju4682/findit/internal/engines/tsk"
+	"github.com/manju4682/findit/internal/extract"
+	"github.com/manju4682/findit/internal/imaging"
+	"github.com/manju4682/findit/internal/model"
+	"github.com/manju4682/findit/internal/preview"
+	"github.com/manju4682/findit/internal/session"
+	"github.com/manju4682/findit/internal/storage"
 )
 
 // ListDevices returns the physical storage devices on this machine.
@@ -75,6 +76,10 @@ func Preview(ctx context.Context, src storage.Source, source model.RecoverySourc
 // Recover extracts the given files from a source to destDir, routing each file
 // through the correct mechanism for its source kind.
 func Recover(ctx context.Context, src storage.Source, source model.RecoverySource, files []model.RecoveredFile, destDir string, preservePaths bool) (*extract.Result, error) {
+	// Writing to the drive being recovered could overwrite the very data we're after.
+	if device.OnSourceDisk(src, destDir) {
+		return nil, errors.New("recovered files can’t be saved on the drive you’re recovering from — choose a folder on a different drive")
+	}
 	var open extract.Opener
 	if source.Kind == model.SourceFilesystem {
 		open = fsOpener(src, source)
@@ -91,9 +96,10 @@ func Recover(ctx context.Context, src storage.Source, source model.RecoverySourc
 
 const previewCap = 64 << 20 // cap bytes pulled for a filesystem-file preview
 
-// fsOpener streams a filesystem file's content via TSK icat.
+// fsOpener streams a filesystem file's content via TSK icat (through the
+// privileged helper when the drive is being scanned directly).
 func fsOpener(src storage.Source, source model.RecoverySource) extract.Opener {
-	eng := tsk.New(src.Name(), source.Offset, source.FSType)
+	eng := tsk.ForSource(src, source.Offset, source.FSType)
 	return func(ctx context.Context, f model.RecoveredFile) (io.ReadCloser, error) {
 		pr, pw := io.Pipe()
 		go func() {

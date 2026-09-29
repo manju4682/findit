@@ -11,13 +11,15 @@ import {
   chooseImage,
   startClone,
   skipClone,
+  cancelClone,
+  cancelScan,
   startScan,
   setActiveSource,
   reset,
   openFullDiskAccess,
 } from './store'
 import { fmtSize, sourceSummary, sourceLabel, recoverConfidence } from './utils'
-import appicon from './assets/appicon.png'
+import appicon from './assets/appicon-128.png'
 
 onMounted(initStore)
 
@@ -116,6 +118,18 @@ function gotoStep(key) {
     <main class="flex-1 flex flex-col overflow-hidden bg-slate-50">
       <div v-if="store.error" class="mx-6 mt-4 px-4 py-2 bg-red-50 text-red-700 rounded-lg text-sm border border-red-100">
         {{ store.error }}
+        <button
+          v-if="store.error.includes('Full Disk Access')"
+          class="ml-1 text-blue-600 hover:underline"
+          @click="openFullDiskAccess"
+        >Open Full Disk Access settings…</button>
+      </div>
+      <div
+        v-if="store.notice"
+        class="mx-6 mt-4 px-4 py-2 bg-amber-50 text-amber-800 rounded-lg text-sm border border-amber-200 flex items-start gap-2"
+      >
+        <span class="flex-1">{{ store.notice }}</span>
+        <button class="text-amber-700 hover:text-amber-900" title="Dismiss" @click="store.notice = ''">✕</button>
       </div>
 
       <!-- SOURCE -->
@@ -204,7 +218,7 @@ function gotoStep(key) {
                 Clone drive (recommended)
               </button>
               <button class="px-5 py-2.5 border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 text-sm" @click="skipClone">
-                Skip and scan directly
+                Skip and scan the drive directly
               </button>
             </div>
 
@@ -213,17 +227,27 @@ function gotoStep(key) {
               <div class="h-2.5 bg-slate-200 rounded-full overflow-hidden mb-2">
                 <div class="h-full bg-blue-600 transition-all" :style="{ width: store.clonePct + '%' }"></div>
               </div>
-              <div class="text-xs text-slate-500">{{ store.cloneStatus || 'Waiting for permission…' }}</div>
+              <div class="flex items-center justify-between">
+                <div class="text-xs text-slate-500">{{ store.cloneStatus || 'Waiting for permission…' }}</div>
+                <button
+                  class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-600 hover:bg-slate-50"
+                  @click="cancelClone"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
 
           <div class="mt-3 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 flex items-start gap-2">
             <span>🔐</span>
             <div>
-              Reading a drive needs permission. macOS will ask for your password, and you may also need
-              to grant FindIt <b>Full Disk Access</b>.
-              <button class="text-blue-600 hover:underline ml-1" @click="openFullDiskAccess">Open settings…</button>
-              If cloning fails, you can also open an existing image instead.
+              Reading a drive needs administrator access, so cloning and “scan directly” both ask for
+              your password once. If macOS still blocks the drive, allow FindIt under <b>Full Disk Access</b>.
+              <button class="text-blue-600 hover:underline" @click="openFullDiskAccess">Open settings…</button>
+              <br />
+              <b>Scan directly</b> uses no extra disk space but keeps nothing for next time; <b>cloning</b>
+              saves a reusable image and is safer for a failing drive.
             </div>
           </div>
         </div>
@@ -303,13 +327,31 @@ function gotoStep(key) {
       <!-- SCANNING -->
       <div v-else-if="store.step === 'scanning'" class="flex-1 flex items-center justify-center p-8">
         <div class="max-w-lg w-full text-center">
-          <div class="text-lg font-medium mb-4">Analyzing your drive…</div>
-          <div class="h-1.5 bg-slate-200 rounded-full overflow-hidden mb-4">
-            <div class="h-full bg-blue-600 animate-pulse w-2/3 mx-auto"></div>
+          <div class="text-lg font-medium mb-1">Analyzing your drive…</div>
+          <div class="text-xs text-slate-500 mb-4">
+            <template v-if="store.scanStatus">{{ store.scanStatus }} — a full drive can take several minutes.</template>
+            <template v-else>Waiting for permission… a full drive can take several minutes.</template>
           </div>
-          <div class="text-left text-xs text-slate-500 bg-white border rounded-lg p-3 h-44 overflow-auto font-mono">
-            <div v-for="(m, i) in store.progress" :key="i">{{ m }}</div>
+          <div class="h-2 bg-slate-200 rounded-full overflow-hidden mb-4">
+            <div
+              v-if="store.scanPct > 0"
+              class="h-full bg-blue-600 transition-all"
+              :style="{ width: store.scanPct + '%' }"
+            ></div>
+            <div v-else class="h-full bg-blue-600 animate-pulse w-2/3 mx-auto"></div>
           </div>
+          <div
+            v-if="store.progress.length"
+            class="text-left text-xs text-slate-500 bg-white border rounded-lg p-3 max-h-44 overflow-auto"
+          >
+            <div v-for="(m, i) in store.progress" :key="i" class="py-0.5">{{ m }}</div>
+          </div>
+          <button
+            class="mt-4 px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-600 hover:bg-slate-50"
+            @click="cancelScan"
+          >
+            Cancel scan
+          </button>
         </div>
       </div>
 

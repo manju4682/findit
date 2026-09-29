@@ -1,22 +1,26 @@
 // Package preview turns a recovered file's bytes into a thumbnail. Images use
-// the standard library; video uses an ffmpeg snapshot when available and
-// otherwise falls back to a structural status.
+// the standard library; video uses an ffmpeg snapshot when available, macOS
+// Quick Look otherwise, and falls back to a structural status.
 package preview
 
 import (
 	"bytes"
 	"context"
+	"errors"
 	"image"
-	_ "image/jpeg" // register JPEG decoder for image.Decode
+	"image/color"
 	"image/png"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
+	"time"
 
-	"github.com/findit/findit/internal/model"
-	"github.com/findit/findit/internal/storage"
+	"github.com/manju4682/findit/internal/model"
+	"github.com/manju4682/findit/internal/safeimage"
+	"github.com/manju4682/findit/internal/storage"
 )
 
 // DefaultMaxDim is the default longest-edge size of a generated thumbnail.
@@ -63,7 +67,7 @@ func FromBytes(ctx context.Context, ext string, data []byte, maxDim int) *Previe
 		maxDim = DefaultMaxDim
 	}
 	switch ext {
-	case "jpg", "jpeg", "png":
+	case "jpg", "jpeg", "png", "gif":
 		return imageFromBytes(data, maxDim)
 	case "mp4", "mov", "m4v":
 		return videoFromBytes(ctx, ext, data, maxDim)
@@ -74,7 +78,7 @@ func FromBytes(ctx context.Context, ext string, data []byte, maxDim int) *Previe
 
 func kindFor(ext string) Kind {
 	switch ext {
-	case "jpg", "jpeg", "png":
+	case "jpg", "jpeg", "png", "gif":
 		return KindImage
 	case "mp4", "mov", "m4v":
 		return KindVideo
@@ -84,7 +88,10 @@ func kindFor(ext string) Kind {
 }
 
 func imageFromBytes(data []byte, maxDim int) *Preview {
-	img, _, err := image.Decode(bytes.NewReader(data))
+	img, err := safeimage.Decode(bytes.NewReader(data))
+	if errors.Is(err, safeimage.ErrTooLarge) {
+		return &Preview{Kind: KindImage, Status: model.StatusUncertain, Note: "This image is too large to preview."}
+	}
 	if err != nil {
 		return &Preview{Kind: KindImage, Status: model.StatusRawFragment,
 			Note: "This looks like an image but is too incomplete to open — likely a fragment or partially overwritten."}
@@ -111,26 +118,55 @@ func videoFromBytes(ctx context.Context, ext string, data []byte, maxDim int) *P
 	}
 	p := &Preview{Kind: KindVideo, Status: status}
 
-	if _, err := exec.LookPath("ffmpeg"); err != nil {
-		p.Note = "install ffmpeg for video snapshots"
-		return p
-	}
-	thumb, err := ffmpegSnapshot(ctx, ext, data, maxDim)
+	thumb, err := videoSnapshot(ctx, ext, data, maxDim, status == model.StatusGood)
 	if err != nil || len(thumb) == 0 {
 		p.Note = "no snapshot available"
 		return p
 	}
-	p.Thumbnail = thumb
-	if img, err := png.Decode(bytes.NewReader(thumb)); err == nil {
-		b := img.Bounds()
-		p.Width, p.Height = b.Dx(), b.Dy()
+	img, err := png.Decode(bytes.NewReader(thumb))
+	if err != nil {
+		p.Note = "no snapshot available"
+		return p
 	}
+	if b := img.Bounds(); b.Dx() > maxDim || b.Dy() > maxDim {
+		var buf bytes.Buffer
+		if png.Encode(&buf, scaleDown(img, maxDim)) == nil {
+			thumb = buf.Bytes()
+			img, _ = png.Decode(bytes.NewReader(thumb))
+		}
+	}
+	p.Thumbnail = thumb
+	b := img.Bounds()
+	p.Width, p.Height = b.Dx(), b.Dy()
 	return p
 }
 
-// ffmpegSnapshot writes data to a temp path and asks ffmpeg for one frame,
-// scaled to fit maxDim, encoded as PNG.
-func ffmpegSnapshot(ctx context.Context, ext string, data []byte, maxDim int) ([]byte, error) {
+// snapshotTimeout bounds an external thumbnailer; Quick Look can stall on
+// damaged video instead of failing.
+var snapshotTimeout = 8 * time.Second
+
+// findFFmpeg looks on PATH and in the Homebrew prefixes, since apps launched
+// from Finder get a minimal PATH.
+func findFFmpeg() (string, error) {
+	if p, err := exec.LookPath("ffmpeg"); err == nil {
+		return p, nil
+	}
+	for _, p := range []string{"/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"} {
+		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
+			return p, nil
+		}
+	}
+	return "", exec.ErrNotFound
+}
+
+// videoSnapshot writes data to a private temp dir and asks ffmpeg (if
+// installed) or, for structurally complete files, macOS Quick Look for one
+// frame as PNG.
+func videoSnapshot(ctx context.Context, ext string, data []byte, maxDim int, allowQuickLook bool) ([]byte, error) {
+	ffmpeg, ffErr := findFFmpeg()
+	if ffErr != nil && (runtime.GOOS != "darwin" || !allowQuickLook) {
+		return nil, ffErr
+	}
 	dir, err := os.MkdirTemp("", "findit-preview-")
 	if err != nil {
 		return nil, err
@@ -138,18 +174,28 @@ func ffmpegSnapshot(ctx context.Context, ext string, data []byte, maxDim int) ([
 	defer os.RemoveAll(dir)
 
 	in := filepath.Join(dir, "in."+ext)
-	out := filepath.Join(dir, "frame.png")
 	if err := os.WriteFile(in, data, 0o600); err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithTimeout(ctx, snapshotTimeout)
+	defer cancel()
 
-	scale := "scale='min(" + strconv.Itoa(maxDim) + ",iw)':-1"
-	cmd := exec.CommandContext(ctx, "ffmpeg", "-nostdin", "-loglevel", "error",
-		"-i", in, "-frames:v", "1", "-vf", scale, "-y", out)
+	if ffErr == nil {
+		out := filepath.Join(dir, "frame.png")
+		scale := "scale='min(" + strconv.Itoa(maxDim) + ",iw)':-1"
+		cmd := exec.CommandContext(ctx, ffmpeg, "-nostdin", "-loglevel", "error",
+			"-i", in, "-frames:v", "1", "-vf", scale, "-y", out)
+		if err := cmd.Run(); err != nil {
+			return nil, err
+		}
+		return os.ReadFile(out)
+	}
+	// Quick Look writes <dir>/<input name>.png.
+	cmd := exec.CommandContext(ctx, "/usr/bin/qlmanage", "-t", "-s", strconv.Itoa(maxDim), "-o", dir, in)
 	if err := cmd.Run(); err != nil {
 		return nil, err
 	}
-	return os.ReadFile(out)
+	return os.ReadFile(in + ".png")
 }
 
 // readFile reads a recovered file's bytes (up to readCap) by concatenating its
@@ -200,6 +246,7 @@ func scaleDown(src image.Image, maxDim int) *image.RGBA {
 		}
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, dw, dh))
+	avg := boxAverager(src)
 	for dy := 0; dy < dh; dy++ {
 		sy0 := b.Min.Y + dy*sh/dh
 		sy1 := b.Min.Y + (dy+1)*sh/dh
@@ -212,28 +259,65 @@ func scaleDown(src image.Image, maxDim int) *image.RGBA {
 			if sx1 <= sx0 {
 				sx1 = sx0 + 1
 			}
-			var rs, gs, bs, as, count uint64
-			for y := sy0; y < sy1; y++ {
-				for x := sx0; x < sx1; x++ {
-					r, g, bl, a := src.At(x, y).RGBA()
-					rs += uint64(r)
-					gs += uint64(g)
-					bs += uint64(bl)
-					as += uint64(a)
-					count++
-				}
-			}
-			if count == 0 {
-				count = 1
-			}
+			c := avg(sx0, sy0, sx1, sy1)
 			i := dst.PixOffset(dx, dy)
-			dst.Pix[i+0] = uint8((rs / count) >> 8)
-			dst.Pix[i+1] = uint8((gs / count) >> 8)
-			dst.Pix[i+2] = uint8((bs / count) >> 8)
-			dst.Pix[i+3] = uint8((as / count) >> 8)
+			dst.Pix[i+0], dst.Pix[i+1], dst.Pix[i+2], dst.Pix[i+3] = c.R, c.G, c.B, c.A
 		}
 	}
 	return dst
+}
+
+// boxAverager returns a function that averages src over [x0,x1)×[y0,y1).
+// JPEG (YCbCr) and RGBA images are read straight from their pixel buffers,
+// which is many times faster than the generic At() path for large photos.
+func boxAverager(src image.Image) func(x0, y0, x1, y1 int) color.RGBA {
+	switch im := src.(type) {
+	case *image.YCbCr:
+		return func(x0, y0, x1, y1 int) color.RGBA {
+			var rs, gs, bs, n int
+			for y := y0; y < y1; y++ {
+				for x := x0; x < x1; x++ {
+					ci := im.COffset(x, y)
+					r, g, b := color.YCbCrToRGB(im.Y[im.YOffset(x, y)], im.Cb[ci], im.Cr[ci])
+					rs += int(r)
+					gs += int(g)
+					bs += int(b)
+					n++
+				}
+			}
+			return color.RGBA{uint8(rs / n), uint8(gs / n), uint8(bs / n), 0xFF}
+		}
+	case *image.RGBA:
+		return func(x0, y0, x1, y1 int) color.RGBA {
+			var r, g, b, a, n int
+			for y := y0; y < y1; y++ {
+				i := im.PixOffset(x0, y)
+				for x := x0; x < x1; x++ {
+					r += int(im.Pix[i])
+					g += int(im.Pix[i+1])
+					b += int(im.Pix[i+2])
+					a += int(im.Pix[i+3])
+					i += 4
+					n++
+				}
+			}
+			return color.RGBA{uint8(r / n), uint8(g / n), uint8(b / n), uint8(a / n)}
+		}
+	}
+	return func(x0, y0, x1, y1 int) color.RGBA {
+		var rs, gs, bs, as, n uint64
+		for y := y0; y < y1; y++ {
+			for x := x0; x < x1; x++ {
+				r, g, bl, a := src.At(x, y).RGBA()
+				rs += uint64(r)
+				gs += uint64(g)
+				bs += uint64(bl)
+				as += uint64(a)
+				n++
+			}
+		}
+		return color.RGBA{uint8((rs / n) >> 8), uint8((gs / n) >> 8), uint8((bs / n) >> 8), uint8((as / n) >> 8)}
+	}
 }
 
 func max1(v int) int {

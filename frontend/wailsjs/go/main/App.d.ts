@@ -3,6 +3,10 @@
 import {main} from '../models';
 import {device} from '../models';
 
+export function CancelClone():Promise<void>;
+
+export function CancelScan():Promise<void>;
+
 export function DetectPartitions(arg1:string):Promise<Array<main.PartitionDTO>>;
 
 export function ListDevices():Promise<Array<device.Device>>;

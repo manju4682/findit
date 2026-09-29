@@ -7,7 +7,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/findit/findit/internal/model"
+	"github.com/manju4682/findit/internal/model"
 )
 
 // Kind classifies an event on a job's stream.

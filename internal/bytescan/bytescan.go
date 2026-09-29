@@ -4,8 +4,8 @@
 package bytescan
 
 import (
-	"bufio"
 	"bytes"
+	"context"
 	"io"
 )
 
@@ -21,27 +21,28 @@ const chunkSize = 1 << 20 // 1 MiB read granularity
 //
 // overlap is the number of trailing bytes carried to the next window and must
 // exceed the longest pattern (or fixed-size structure) the visitor inspects at a
-// single position.
-func Scan(r io.Reader, overlap int, visit func(win []byte, base int64, safe int)) error {
-	br := bufio.NewReaderSize(r, chunkSize)
-	tmp := make([]byte, chunkSize)
-	var carry []byte
+// single position. win is reused between calls, so visit must not retain it.
+// Scan stops promptly and returns ctx.Err() if ctx is canceled.
+func Scan(ctx context.Context, r io.Reader, overlap int, visit func(win []byte, base int64, safe int)) error {
+	overlap = max(overlap, 0)
+	buf := make([]byte, overlap+chunkSize)
+	carry := 0
 	var base int64
 
 	for {
-		n, err := io.ReadFull(br, tmp)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		n, err := io.ReadFull(r, buf[carry:carry+chunkSize])
 		eof := err == io.EOF || err == io.ErrUnexpectedEOF
 		if err != nil && !eof {
 			return err
 		}
 
-		win := append(carry, tmp[:n]...)
-		L := len(win)
-		safe := L
+		win := buf[:carry+n]
+		safe := len(win)
 		if !eof {
-			if safe = L - overlap; safe < 0 {
-				safe = 0
-			}
+			safe = max(len(win)-overlap, 0)
 		}
 
 		visit(win, base, safe)
@@ -50,7 +51,7 @@ func Scan(r io.Reader, overlap int, visit func(win []byte, base int64, safe int)
 			return nil
 		}
 		base += int64(safe)
-		carry = append([]byte(nil), win[safe:]...) // fresh copy; win may alias carry
+		carry = copy(buf, win[safe:])
 	}
 }
 

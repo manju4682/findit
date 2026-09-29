@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/findit/findit/internal/storage"
+	"github.com/manju4682/findit/internal/storage"
 )
 
 // FixturePath returns the path to a named fixture, skipping the test if it is

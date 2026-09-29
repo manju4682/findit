@@ -3,15 +3,43 @@ package tsk
 import (
 	"bytes"
 	"context"
+	"errors"
 	"image/jpeg"
+	"io"
+	"strings"
 	"testing"
 
-	"github.com/findit/findit/internal/model"
-	"github.com/findit/findit/internal/testutil"
+	"github.com/manju4682/findit/internal/model"
+	"github.com/manju4682/findit/internal/testutil"
 )
 
 func fixturePath(t *testing.T) string {
 	return testutil.FixturePath(t, "fat32_files.bin")
+}
+
+// TestArgs_ValidatesRequests guards the privileged helper: only fls/icat run,
+// offsets can't be negative, and an inode can't smuggle in extra arguments.
+func TestArgs_ValidatesRequests(t *testing.T) {
+	tool, args, err := Args(Request{Op: "icat", Offset: 1 << 20, FSType: model.FSExFAT, Inode: "128-1"}, "/dev/disk4")
+	if err != nil || tool != "icat" {
+		t.Fatalf("valid icat rejected: tool=%q err=%v", tool, err)
+	}
+	want := []string{"-o", "2048", "-f", "exfat", "/dev/disk4", "128-1"}
+	if strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Fatalf("icat args = %v, want %v", args, want)
+	}
+
+	for _, bad := range []Request{
+		{Op: "rm"},
+		{Op: "fls", Offset: -512},
+		{Op: "icat", Inode: "5 -o 0"},
+		{Op: "icat", Inode: "../etc/passwd"},
+		{Op: "icat", Inode: ""},
+	} {
+		if _, _, err := Args(bad, "/dev/disk4"); err == nil {
+			t.Errorf("Args(%+v) accepted, want rejection", bad)
+		}
+	}
 }
 
 func flatten(n *model.Node, out *[]*model.RecoveredFile) {
@@ -20,6 +48,53 @@ func flatten(n *model.Node, out *[]*model.RecoveredFile) {
 	}
 	for _, c := range n.Children {
 		flatten(c, out)
+	}
+}
+
+// fakeExec replays canned fls output, then returns err.
+type fakeExec struct {
+	out string
+	err error
+}
+
+func (f fakeExec) Exec(_ context.Context, _ Request, w io.Writer) error {
+	if _, err := io.WriteString(w, f.out); err != nil {
+		return err
+	}
+	return f.err
+}
+
+const flsSample = "d/d 3:\tDCIM\t0\t0\t0\t0\t0\t0\t0\n" +
+	"r/r 5:\tDCIM/IMG_1.jpg\t0\t0\t0\t0\t1234\t0\t0\n" +
+	"r/r * 6:\tDCIM/100CANON/IMG_2.jpg\t0\t0\t0\t0\t99\t0\t0\n" +
+	"d/d 3:\tDCIM\t0\t0\t0\t0\t0\t0\t0\n" +
+	"r/r 7:\tnotes.txt\t0\t0\t0\t0\t5\t0\t0\n"
+
+func TestEnumerate_BuildsTreeFromStream(t *testing.T) {
+	eng := &Engine{exec: fakeExec{out: flsSample}, fsType: model.FSFAT32}
+	src, err := eng.Enumerate(context.Background())
+	if err != nil {
+		t.Fatalf("Enumerate: %v", err)
+	}
+	if src.FileCount != 3 || src.RecoverableCount != 2 {
+		t.Fatalf("counts = %d/%d, want 3/2", src.FileCount, src.RecoverableCount)
+	}
+	if len(src.Root.Children) != 2 {
+		t.Fatalf("root has %d children, want DCIM + notes.txt", len(src.Root.Children))
+	}
+	dcim := src.Root.Children[0]
+	if dcim.Name != "DCIM" || len(dcim.Children) != 2 {
+		t.Fatalf("DCIM = %q with %d children, want 2 (IMG_1.jpg, 100CANON)", dcim.Name, len(dcim.Children))
+	}
+	if sub := dcim.Children[1]; !sub.IsDir || sub.Name != "100CANON" || sub.Children[0].File.Path != "DCIM/100CANON" {
+		t.Fatalf("nested directory not built correctly: %+v", sub)
+	}
+}
+
+func TestEnumerate_ReportsToolFailure(t *testing.T) {
+	eng := &Engine{exec: fakeExec{out: flsSample[:40], err: errors.New("fls: exit status 1: bad superblock")}}
+	if _, err := eng.Enumerate(context.Background()); err == nil || !strings.Contains(err.Error(), "bad superblock") {
+		t.Fatalf("err = %v, want the tool's error", err)
 	}
 }
 

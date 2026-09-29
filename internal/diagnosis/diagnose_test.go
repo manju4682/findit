@@ -3,8 +3,8 @@ package diagnosis
 import (
 	"testing"
 
-	"github.com/findit/findit/internal/model"
-	"github.com/findit/findit/internal/testutil"
+	"github.com/manju4682/findit/internal/model"
+	"github.com/manju4682/findit/internal/testutil"
 )
 
 func TestDiagnose_ChangedFilesystem(t *testing.T) {

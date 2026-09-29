@@ -7,11 +7,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/findit/findit/internal/engines/tsk"
-	"github.com/findit/findit/internal/model"
-	"github.com/findit/findit/internal/preview"
-	"github.com/findit/findit/internal/storage"
-	"github.com/findit/findit/internal/testutil"
+	"github.com/manju4682/findit/internal/engines/tsk"
+	"github.com/manju4682/findit/internal/model"
+	"github.com/manju4682/findit/internal/preview"
+	"github.com/manju4682/findit/internal/storage"
+	"github.com/manju4682/findit/internal/testutil"
 )
 
 func fixture(t *testing.T, name string) storage.Source {

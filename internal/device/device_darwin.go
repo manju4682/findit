@@ -11,6 +11,9 @@ import (
 	"strings"
 )
 
+// diskutil is invoked by absolute path because the privileged helpers call it as root.
+const diskutil = "/usr/sbin/diskutil"
+
 var (
 	reWholeDisk = regexp.MustCompile(`^/dev/(disk\d+) \(([^)]*)\):`)
 	reBytes     = regexp.MustCompile(`\((\d+) Bytes\)`)
@@ -19,7 +22,7 @@ var (
 
 // listDevices enumerates physical whole disks via diskutil.
 func listDevices(ctx context.Context) ([]Device, error) {
-	out, err := exec.CommandContext(ctx, "diskutil", "list").Output()
+	out, err := exec.CommandContext(ctx, diskutil, "list").Output()
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +49,7 @@ func listDevices(ctx context.Context) ([]Device, error) {
 
 // infoDevice parses `diskutil info <id>` into a Device.
 func infoDevice(ctx context.Context, id string) (Device, error) {
-	out, err := exec.CommandContext(ctx, "diskutil", "info", id).Output()
+	out, err := exec.CommandContext(ctx, diskutil, "info", id).Output()
 	if err != nil {
 		return Device{}, err
 	}

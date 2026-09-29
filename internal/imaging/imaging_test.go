@@ -9,7 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/findit/findit/internal/jobs"
+	"github.com/manju4682/findit/internal/jobs"
+	"github.com/manju4682/findit/internal/storage"
 )
 
 // memSource is an in-memory storage.Source with an optional unreadable range,
@@ -106,6 +107,35 @@ func TestImage_ZeroFillsBadBlocks(t *testing.T) {
 	r := j.Result()
 	if len(r.BadRegions) != 1 || r.BadRegions[0].Offset != 2*bs || r.BadRegions[0].Length != bs {
 		t.Errorf("bad regions = %+v, want one [%d,%d]", r.BadRegions, 2*bs, bs)
+	}
+}
+
+// TestImage_BadSectorLosesOnlyItsChunk: one bad sector inside a large block
+// must not zero the whole block — the rest is salvaged by re-reading.
+func TestImage_BadSectorLosesOnlyItsChunk(t *testing.T) {
+	data := make([]byte, DefaultBlockSize)
+	rand.New(rand.NewSource(3)).Read(data)
+	const badAt = 1<<20 + 4096
+	src := &memSource{name: "mem", data: data, failFrom: badAt, failTo: badAt + 512}
+	dest := filepath.Join(t.TempDir(), "out.bin")
+
+	j, err := Image(context.Background(), src, dest, Options{OnReadError: ZeroFill})
+	if err != nil {
+		t.Fatalf("Image: %v", err)
+	}
+	drain(j)
+	if err := j.Wait(); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	r := j.Result()
+	chunk := int64(storage.SalvageChunk)
+	lost := badAt / chunk * chunk
+	if len(r.BadRegions) != 1 || r.BadRegions[0].Offset != lost || r.BadRegions[0].Length != chunk {
+		t.Fatalf("bad regions = %+v, want one [%d,%d]", r.BadRegions, lost, chunk)
+	}
+	got, _ := os.ReadFile(dest)
+	if !bytes.Equal(got[:lost], data[:lost]) || !bytes.Equal(got[lost+chunk:], data[lost+chunk:]) {
+		t.Error("readable data around the bad sector was not preserved")
 	}
 }
 

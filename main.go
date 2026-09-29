@@ -30,8 +30,9 @@ func main() {
 				Message: "Recover your files — a friendly layer over proven recovery engines.",
 			},
 		},
-		OnStartup: app.startup,
-		Bind:      []any{app},
+		OnStartup:  app.startup,
+		OnShutdown: app.shutdown,
+		Bind:       []any{app},
 	})
 	if err != nil {
 		println("Error:", err.Error())

@@ -1,13 +1,15 @@
 package diagnosis
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
 
-	"github.com/findit/findit/internal/config"
-	"github.com/findit/findit/internal/model"
-	"github.com/findit/findit/internal/storage"
+	"github.com/manju4682/findit/internal/bytescan"
+	"github.com/manju4682/findit/internal/config"
+	"github.com/manju4682/findit/internal/model"
+	"github.com/manju4682/findit/internal/storage"
 )
 
 // Diagnose opens a disk image and produces a full Diagnosis. It is a thin
@@ -18,20 +20,52 @@ func Diagnose(path string) (*model.Diagnosis, error) {
 		return nil, err
 	}
 	defer src.Close()
-	return DiagnoseSource(src)
+	return DiagnoseSource(context.Background(), src, nil)
 }
 
-// DiagnoseSource produces a full Diagnosis from any read-only Source: the
-// current filesystem, previous/underlying filesystem candidates, a raw media
-// summary, and a plain-English narrative.
-func DiagnoseSource(src storage.Source) (*model.Diagnosis, error) {
+// DiagnoseSource produces a full Diagnosis from any read-only Source in one
+// streaming pass. It stops promptly if ctx is canceled, and reports scan
+// progress through progress (done, total bytes) when non-nil. Callers that also
+// carve can share the pass via Prepare/Scanner/Build instead.
+func DiagnoseSource(ctx context.Context, src storage.Source, progress func(done, total int64)) (*model.Diagnosis, error) {
+	prep, err := Prepare(src)
+	if err != nil {
+		return nil, err
+	}
+	sc := prep.NewScanner()
+	total := src.Size()
+	err = bytescan.Scan(ctx, storage.Reader(src), sc.Overlap(), func(win []byte, base int64, safe int) {
+		sc.Visit(win, base, safe)
+		if progress != nil {
+			progress(base+int64(safe), total)
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	return prep.Build(sc), nil
+}
+
+// Prep holds the fast pre-scan facts about a source — the current filesystem and
+// any underlying/partition filesystems — gathered from small reads before the
+// full content pass. It is the input to a single pass that can be shared with
+// carving.
+type Prep struct {
+	src          storage.Source
+	current      model.FSIdentity
+	present      []model.FSIdentity
+	presentTypes map[model.FSType]bool
+}
+
+// Prepare reads the boot sector and partition table (small reads only) to learn
+// the current and underlying filesystems, without the full content pass.
+func Prepare(src storage.Source) (*Prep, error) {
 	// Use the source's real sector size (512 for images, the device's actual
 	// block size otherwise) so partition offsets are correct on 4Kn drives too.
 	bs := sectorSizeOf(src)
-
 	head := make([]byte, bs)
 	if _, err := src.ReadAt(head, 0); err != nil {
-		return nil, fmt.Errorf("reading boot sector: %w", err)
+		clear(head) // unreadable first sector: no current filesystem, raw recovery still runs
 	}
 	curType, curLabel := identifyBoot(head)
 	current := model.FSIdentity{Type: curType, Offset: 0, Size: src.Size(), Label: curLabel}
@@ -45,28 +79,47 @@ func DiagnoseSource(src storage.Source) (*model.Diagnosis, error) {
 			current = present[0]
 		}
 	}
-
 	presentTypes := map[model.FSType]bool{current.Type: true}
 	for _, p := range present {
 		presentTypes[p.Type] = true
 	}
+	return &Prep{src: src, current: current, present: present, presentTypes: presentTypes}, nil
+}
 
-	res, err := scan(storage.Reader(src), current.Type)
-	if err != nil {
-		return nil, err
-	}
+// Scanner accumulates content evidence (boot sectors, MFT records, type strings,
+// media counts) from streamed windows. Feed every window to Visit, then Build.
+type Scanner struct {
+	res     *scanResult
+	curType model.FSType
+}
 
-	carve := model.CarveSummary{Counts: res.carve}
+// NewScanner returns a content Scanner for this Prep.
+func (p *Prep) NewScanner() *Scanner {
+	return &Scanner{res: newScanResult(), curType: p.current.Type}
+}
+
+// Overlap is the trailing overlap the scanner needs between windows (it must
+// exceed one sector so the aligned boot-sector probe can read a full sector).
+func (s *Scanner) Overlap() int { return config.Get().Diagnosis.ScanOverlapBytes }
+
+// Visit processes one streamed window.
+func (s *Scanner) Visit(win []byte, base int64, safe int) {
+	scanWindow(s.res, win, safe, base, s.curType)
+}
+
+// Build assembles the final Diagnosis from a completed Scanner.
+func (p *Prep) Build(s *Scanner) *model.Diagnosis {
+	carve := model.CarveSummary{Counts: s.res.carve}
 	d := &model.Diagnosis{
-		ImagePath:  src.Name(),
-		ImageSize:  src.Size(),
-		Current:    current,
-		Present:    present,
-		Candidates: buildCandidates(res, presentTypes, carve),
+		ImagePath:  p.src.Name(),
+		ImageSize:  p.src.Size(),
+		Current:    p.current,
+		Present:    p.present,
+		Candidates: buildCandidates(s.res, p.presentTypes, carve),
 		Carve:      carve,
 	}
 	d.Narrative = narrate(d)
-	return d, nil
+	return d
 }
 
 // Partitions returns the filesystem-bearing partitions on the source without a
@@ -137,21 +190,21 @@ func buildCandidates(res *scanResult, presentTypes map[model.FSType]bool, carve 
 			c.Label = e.Detail
 		}
 	}
-	for t, offs := range res.typeHits {
-		if presentTypes[t] || len(offs) == 0 {
+	for t, h := range res.typeHits {
+		if presentTypes[t] || h.count == 0 {
 			continue
 		}
 		c := get(t)
 		c.Evidence = append(c.Evidence, model.Evidence{
-			Kind: "fs-type-string", FSType: t, Offset: offs[0],
-			Detail: fmt.Sprintf("%d occurrence(s)", len(offs)),
+			Kind: "fs-type-string", FSType: t, Offset: h.first,
+			Detail: fmt.Sprintf("%d occurrence(s)", h.count),
 		})
 	}
-	if len(res.mftHits) > 0 && !presentTypes[model.FSNTFS] {
+	if res.mftHits.count > 0 && !presentTypes[model.FSNTFS] {
 		c := get(model.FSNTFS)
 		c.Evidence = append(c.Evidence, model.Evidence{
-			Kind: "mft-record", FSType: model.FSNTFS, Offset: res.mftHits[0],
-			Detail: fmt.Sprintf("%d MFT FILE record(s)", len(res.mftHits)),
+			Kind: "mft-record", FSType: model.FSNTFS, Offset: res.mftHits.first,
+			Detail: fmt.Sprintf("%d MFT FILE record(s)", res.mftHits.count),
 		})
 	}
 

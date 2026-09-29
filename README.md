@@ -15,14 +15,17 @@ guided workflow, previews, and honest per-file assessment.**
 
 ## Install
 
+Requires macOS 12 or later on Apple Silicon.
+
 1. Download **`FindIt.dmg`** from the [Releases](../../releases) page.
 2. Open it and drag **FindIt** to Applications.
-3. First launch: right-click → **Open** (the app is signed but not yet
-   notarized, so Gatekeeper asks once).
+3. First launch: FindIt isn't notarized yet, so macOS blocks it once. Open
+   **System Settings → Privacy & Security**, scroll to the message about
+   FindIt, and click **Open Anyway**.
 
 Everything is bundled — no Homebrew, no extra downloads.
 
-> macOS (Apple Silicon) for now. Windows is a planned port.
+> Windows and Intel Macs are not supported yet.
 
 ## How it works
 
@@ -40,24 +43,42 @@ pick a drive  →  make a safe copy (clone)  →  scan  →  preview  →  recov
   clear **Recoverable / Limited** status on every file.
 - **Configurable raw recovery.** Choose exactly which file types to carve.
 
+## Safety
+
+- Your drive is only ever **read**. Copies and recovered files can't be saved
+  onto the drive you're recovering from, and existing files are never
+  overwritten.
+- Reading a whole drive needs your administrator password. Only two tiny helper
+  programs run with that access; the app itself never does. See
+  [SECURITY.md](SECURITY.md) for details.
+- FindIt works offline and never sends data anywhere.
+
 ## Build from source
 
-Requires Go 1.23+, Node, and the [Wails](https://wails.io) CLI.
+Requires Go (see `go.mod`), Node 20.19+ or 22.12+, and the [Wails v2](https://wails.io) CLI.
 
 ```bash
-brew install sleuthkit           # only needed for `wails dev` (bundled in the .dmg)
+brew install sleuthkit           # only needed for development (bundled in the .dmg)
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
 wails dev                        # run in development
 ./scripts/build_dmg.sh           # produce a self-contained build/FindIt.dmg
-go test ./...                    # run the test suite
 ```
 
-Recovery-engine binaries are vendored into the `.app` by
+To run the tests, build the frontend once (`go build` embeds it), then:
+
+```bash
+npm --prefix frontend ci && npm --prefix frontend run build
+go test ./...
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for fixtures, project layout, and
+guidelines. Recovery-engine binaries are vendored into the `.app` by
 [`scripts/bundle_engines.sh`](scripts/bundle_engines.sh) so the shipped build has
 no external dependencies.
 
 ## License
 
-Apache-2.0. Bundled engines (The Sleuth Kit) retain their own licenses and are
-invoked as separate processes.
+[Apache-2.0](LICENSE). Bundled engines (The Sleuth Kit and its libraries) keep
+their own licenses and run as separate processes — see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

@@ -3,25 +3,29 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	rt "github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"github.com/findit/findit/internal/carve"
-	"github.com/findit/findit/internal/config"
-	"github.com/findit/findit/internal/device"
-	"github.com/findit/findit/internal/diagnosis"
-	"github.com/findit/findit/internal/jobs"
-	"github.com/findit/findit/internal/model"
-	"github.com/findit/findit/internal/recovery"
-	"github.com/findit/findit/internal/storage"
+	"github.com/manju4682/findit/internal/carve"
+	"github.com/manju4682/findit/internal/config"
+	"github.com/manju4682/findit/internal/device"
+	"github.com/manju4682/findit/internal/diagnosis"
+	"github.com/manju4682/findit/internal/jobs"
+	"github.com/manju4682/findit/internal/model"
+	"github.com/manju4682/findit/internal/privdev"
+	"github.com/manju4682/findit/internal/recovery"
+	"github.com/manju4682/findit/internal/session"
+	"github.com/manju4682/findit/internal/storage"
 )
 
 // App is the Wails-bound backend: a thin layer over the recovery facade that
@@ -37,6 +41,12 @@ type App struct {
 	sourcesByID map[string]model.RecoverySource
 	filesByID   map[string]fileRef
 	devices     map[string]device.Device
+
+	scan            *session.Scan // active scan, for cancellation
+	scanCanceled    bool
+	cloneCancelPath string // sentinel the clone helper watches
+
+	previewSlots chan struct{} // bounds concurrent preview decodes
 }
 
 type fileRef struct {
@@ -45,9 +55,27 @@ type fileRef struct {
 }
 
 // NewApp returns a ready App.
-func NewApp() *App { return &App{} }
+func NewApp() *App {
+	return &App{previewSlots: make(chan struct{}, max(2, runtime.NumCPU()/2))}
+}
 
 func (a *App) startup(ctx context.Context) { a.ctx = ctx }
+
+// shutdown stops background work so no privileged helper outlives the app.
+func (a *App) shutdown(context.Context) {
+	_ = a.CancelClone()
+	a.mu.Lock()
+	scan, src := a.scan, a.src
+	a.scan, a.src = nil, nil
+	a.mu.Unlock()
+	if scan != nil {
+		scan.Cancel()
+		_ = scan.Wait()
+	}
+	if src != nil {
+		_ = src.Close() // also ends a direct-scan helper session
+	}
+}
 
 // SupportedRawTypes lists the file extensions the raw carver understands.
 func (a *App) SupportedRawTypes() []string { return carve.Supported() }
@@ -110,7 +138,7 @@ func (a *App) SelectSaveImagePath(defaultName string) (string, error) {
 // StartClone images a device to destPath, streaming events to the frontend:
 //
 //	clone:progress {message,done,total}
-//	clone:done     {path,bytesCopied,badRegions}
+//	clone:done     {path,unreadableBytes}
 //	clone:error    string
 //
 // Reading a raw device needs elevated privileges, so the copy runs in a bundled
@@ -123,39 +151,72 @@ func (a *App) StartClone(deviceID, destPath string) error {
 	if !ok {
 		return fmt.Errorf("device %q not found; list devices first", deviceID)
 	}
-	helper, err := imageCopyHelperPath()
+	if err := device.CheckImageDestination(destPath, dev); err != nil {
+		return err
+	}
+	helper, err := helperPath("findit-imagecopy")
 	if err != nil {
 		return err
 	}
 
-	shellCmd := fmt.Sprintf("%s -device %s -out %s",
-		shellQuote(helper), shellQuote(deviceID), shellQuote(destPath))
-	script := fmt.Sprintf("do shell script %q with administrator privileges", shellCmd)
+	// A sentinel file the (root) helper polls; touching it aborts the clone.
+	sentinel := destPath + ".cancel"
+	_ = os.Remove(sentinel)
+	a.mu.Lock()
+	a.cloneCancelPath = sentinel
+	a.mu.Unlock()
 
 	go func() {
 		done := make(chan struct{})
 		go a.pollCloneProgress(destPath, dev.Size, done)
 
-		out, err := exec.CommandContext(a.ctx, "osascript", "-e", script).CombinedOutput()
+		msg, err := runElevated(a.ctx, "FindIt needs your password to copy the drive. The drive is only read, never changed.",
+			helper, "-device", deviceID, "-out", destPath, "-cancel", sentinel,
+			"-uid", strconv.Itoa(os.Getuid()), "-gid", strconv.Itoa(os.Getgid()))
 		close(done)
+		_ = os.Remove(sentinel)
+		a.mu.Lock()
+		a.cloneCancelPath = ""
+		a.mu.Unlock()
 
-		if err != nil {
-			msg := strings.TrimSpace(string(out))
-			if strings.Contains(msg, "-128") || strings.Contains(msg, "User canceled") {
-				msg = "Permission was not granted, so the drive wasn’t copied."
+		if err == nil {
+			if strings.HasSuffix(msg, "CANCELED") {
+				rt.EventsEmit(a.ctx, "clone:canceled", nil)
+				return
 			}
-			if strings.Contains(strings.ToLower(msg), "operation not permitted") || strings.Contains(strings.ToLower(msg), "permission denied") {
-				msg = "macOS blocked raw disk access. Open System Settings → Privacy & Security → Full Disk Access and allow FindIt, then retry. If the app still denies access, clone the drive using the built-in administrator prompt or work from an existing disk image."
+			// The helper prints "OK <unreadable bytes>".
+			var unreadable int64
+			if f := strings.Fields(msg); len(f) == 2 && f[0] == "OK" {
+				unreadable, _ = strconv.ParseInt(f[1], 10, 64)
 			}
-			if msg == "" {
-				msg = err.Error()
-			}
-			rt.EventsEmit(a.ctx, "clone:error", msg)
+			rt.EventsEmit(a.ctx, "clone:done", map[string]any{"path": destPath, "unreadableBytes": unreadable})
 			return
 		}
-		rt.EventsEmit(a.ctx, "clone:done", map[string]any{"path": destPath})
+
+		if isUserCanceled(msg) {
+			msg = "Permission was not granted, so the drive wasn’t copied."
+		}
+		if strings.Contains(strings.ToLower(msg), "operation not permitted") || strings.Contains(strings.ToLower(msg), "permission denied") {
+			msg = "macOS blocked access to the drive. Allow FindIt under System Settings → Privacy & Security → Full Disk Access, then try again."
+		}
+		if msg == "" {
+			msg = err.Error()
+		}
+		rt.EventsEmit(a.ctx, "clone:error", msg)
 	}()
 	return nil
+}
+
+// CancelClone aborts an in-progress clone by touching the sentinel the helper
+// watches; the helper deletes the partial image and exits.
+func (a *App) CancelClone() error {
+	a.mu.Lock()
+	p := a.cloneCancelPath
+	a.mu.Unlock()
+	if p == "" {
+		return nil
+	}
+	return os.WriteFile(p, []byte("cancel"), 0o644)
 }
 
 // pollCloneProgress emits progress by watching the growing image file until the
@@ -181,22 +242,50 @@ func (a *App) pollCloneProgress(destPath string, total int64, done <-chan struct
 	}
 }
 
-// imageCopyHelperPath locates the bundled clone helper next to the app binary.
-func imageCopyHelperPath() (string, error) {
+// helperPath locates a bundled helper binary next to the app executable.
+func helperPath(name string) (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
-	p := filepath.Join(filepath.Dir(exe), "findit-imagecopy")
+	p := filepath.Join(filepath.Dir(exe), name)
 	if _, err := os.Stat(p); err != nil {
-		return "", fmt.Errorf("clone helper not found; cloning is only available in the installed app")
+		return "", fmt.Errorf("%s not found; reading a drive is only available in the packaged app (see scripts/build_dmg.sh)", name)
 	}
 	return p, nil
 }
 
-// shellQuote single-quotes a string for safe use in a /bin/sh command line.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+// elevatedScript runs item 2.. of argv as a command with administrator
+// privileges. Every argument goes through AppleScript's `quoted form of`, so no
+// path or name can change the command that runs as root.
+const elevatedScript = `on run argv
+	set cmd to quoted form of (item 2 of argv)
+	repeat with i from 3 to count of argv
+		set cmd to cmd & " " & quoted form of (item i of argv)
+	end repeat
+	do shell script cmd with prompt (item 1 of argv) with administrator privileges
+end run`
+
+// runElevated runs argv as root behind the native macOS password prompt and
+// returns its combined, trimmed output.
+func runElevated(ctx context.Context, prompt string, argv ...string) (string, error) {
+	args := append([]string{"-e", elevatedScript, prompt}, argv...)
+	out, err := exec.CommandContext(ctx, "/usr/bin/osascript", args...).CombinedOutput()
+	msg := strings.TrimSpace(string(out))
+	// Failures read "0:312: execution error: <helper stderr> (1)"; keep the middle.
+	if i := strings.Index(msg, "execution error: "); err != nil && i >= 0 {
+		msg = msg[i+len("execution error: "):]
+		if j := strings.LastIndex(msg, " ("); j > 0 && strings.HasSuffix(msg, ")") {
+			msg = msg[:j]
+		}
+	}
+	return msg, err
+}
+
+// isUserCanceled reports whether osascript output means the password prompt
+// was dismissed.
+func isUserCanceled(msg string) bool {
+	return strings.Contains(msg, "User canceled")
 }
 
 // SelectImageFile opens a file dialog and returns the chosen path ("" if cancelled).
@@ -217,24 +306,22 @@ func (a *App) SelectDirectory() (string, error) {
 	})
 }
 
-// RevealInFinder opens a folder in the OS file manager.
+// RevealInFinder opens a folder in Finder. Only existing directories are
+// accepted, so this can't be used to launch an app or document.
 func (a *App) RevealInFinder(path string) error {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", path)
-	case "windows":
-		cmd = exec.Command("explorer", path)
-	default:
-		cmd = exec.Command("xdg-open", path)
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("not an absolute path: %q", path)
 	}
-	return cmd.Start()
+	if fi, err := os.Stat(path); err != nil || !fi.IsDir() {
+		return fmt.Errorf("not a folder: %q", path)
+	}
+	return exec.Command("/usr/bin/open", path).Start()
 }
 
-// OpenFullDiskAccessSettings opens the macOS Full Disk Access privacy pane so
-// the user can allow FindIt to read raw disks.
+// OpenFullDiskAccessSettings opens System Settings at Privacy & Security →
+// Full Disk Access.
 func (a *App) OpenFullDiskAccessSettings() error {
-	return exec.Command("open", "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles").Start()
+	return exec.Command("/usr/bin/open", "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles").Start()
 }
 
 // ScanDone is the payload of the "scan:done" event.
@@ -247,8 +334,8 @@ type ScanDone struct {
 // filesystems and raw extensions, streaming events to the frontend:
 //
 //	scan:progress {phase,message,done,total}
-//	scan:source   RecoverySource
 //	scan:done     ScanDone
+//	scan:canceled
 //	scan:error    string
 //
 // partitionOffsets optionally restricts filesystem enumeration to the given
@@ -262,8 +349,10 @@ func (a *App) StartScan(path string, filesystems []string, raw bool, rawExts []s
 	return nil
 }
 
-// StartScanDevice scans a device directly (image-first is preferred; this backs
-// the "skip clone" path). Reading a raw device may require elevated privileges.
+// StartScanDevice scans a device directly. Reading a whole raw disk needs
+// administrator privileges (Full Disk Access is not enough), so a short-lived
+// privileged helper opens the device and hands its descriptor back — one
+// password prompt, no clone. The source is only ever read.
 func (a *App) StartScanDevice(deviceID string, filesystems []string, raw bool, rawExts []string, partitionOffsets []int64) error {
 	a.mu.Lock()
 	dev, ok := a.devices[deviceID]
@@ -271,7 +360,7 @@ func (a *App) StartScanDevice(deviceID string, filesystems []string, raw bool, r
 	if !ok {
 		return fmt.Errorf("device %q not found; list devices first", deviceID)
 	}
-	src, err := recovery.OpenDevice(dev)
+	src, err := a.openDeviceElevated(dev)
 	if err != nil {
 		return err
 	}
@@ -279,17 +368,84 @@ func (a *App) StartScanDevice(deviceID string, filesystems []string, raw bool, r
 	return nil
 }
 
+// openDeviceElevated opens a device read-only, first trying a direct open (works
+// if the app itself runs as root) and otherwise launching the privileged helper,
+// which passes back the device descriptor and then stays alive to run TSK as
+// root for this session (so the filesystem tree works on a live drive too).
+func (a *App) openDeviceElevated(dev device.Device) (storage.Source, error) {
+	if src, err := recovery.OpenDevice(dev); err == nil {
+		return src, nil
+	}
+
+	helper, err := helperPath("findit-devopen")
+	if err != nil {
+		return nil, err
+	}
+	// $TMPDIR is per-user and private on macOS, so only this user can bind here.
+	sock := filepath.Join(os.TempDir(), fmt.Sprintf("findit-dev-%d.sock", time.Now().UnixNano()))
+	ln, err := privdev.Listen(sock)
+	if err != nil {
+		return nil, err
+	}
+
+	// osascript only returns when the helper exits, i.e. at the end of the
+	// session — or early, if the password prompt is dismissed or the helper fails.
+	osaFailed := make(chan error, 1)
+	go func() {
+		msg, e := runElevated(a.ctx, "FindIt needs your password to read the drive. The drive is only read, never changed.",
+			helper, "-device", dev.ID, "-socket", sock)
+		switch {
+		case isUserCanceled(msg):
+			msg = "Permission was not granted, so the drive couldn’t be opened."
+		case msg == "" && e != nil:
+			msg = e.Error()
+		case msg == "":
+			msg = "the drive helper exited unexpectedly"
+		}
+		osaFailed <- errors.New(msg)
+	}()
+
+	type accepted struct {
+		sess *privdev.Session
+		f    *os.File
+		err  error
+	}
+	got := make(chan accepted, 1)
+	go func() {
+		s, f, err := ln.Accept(dev.RawNode, 180*time.Second)
+		got <- accepted{s, f, err}
+	}()
+
+	select {
+	case r := <-got:
+		if r.err != nil {
+			ln.Close()
+			return nil, fmt.Errorf("couldn’t open the drive for scanning: %v", r.err)
+		}
+		return device.NewHelperSource(r.f, dev, r.sess), nil
+	case err := <-osaFailed:
+		ln.Close() // unblocks Accept
+		if r := <-got; r.err == nil {
+			r.sess.Close()
+			r.f.Close()
+		}
+		return nil, err
+	}
+}
+
 func (a *App) runScan(src storage.Source, filesystems []string, raw bool, rawExts []string, partitionOffsets []int64) {
 	a.mu.Lock()
-	if a.src != nil {
-		a.src.Close()
-	}
-	a.src = src
-	a.diag = nil
-	a.result = model.ScanResult{}
-	a.sourcesByID = map[string]model.RecoverySource{}
-	a.filesByID = map[string]fileRef{}
+	prev, prevSrc := a.scan, a.src
+	a.scan = nil
 	a.mu.Unlock()
+	// Stop the previous scan before closing the source it is still reading.
+	if prev != nil {
+		prev.Cancel()
+		_ = prev.Wait()
+	}
+	if prevSrc != nil {
+		_ = prevSrc.Close()
+	}
 
 	req := model.ScanRequest{Raw: raw, RawExtensions: rawExts, PartitionOffsets: partitionOffsets}
 	for _, f := range filesystems {
@@ -297,32 +453,75 @@ func (a *App) runScan(src storage.Source, filesystems []string, raw bool, rawExt
 	}
 
 	scan := recovery.Scan(a.ctx, src, req)
+	a.mu.Lock()
+	a.src = src
+	a.diag = nil
+	a.result = model.ScanResult{}
+	a.sourcesByID = map[string]model.RecoverySource{}
+	a.filesByID = map[string]fileRef{}
+	a.scan = scan
+	a.scanCanceled = false
+	a.mu.Unlock()
+
+	// emit drops events from a scan that has since been replaced, so a late
+	// "canceled" from the old scan can't reset the UI during the new one.
+	emit := func(name string, data any) {
+		a.mu.Lock()
+		current := a.scan == scan
+		a.mu.Unlock()
+		if current {
+			rt.EventsEmit(a.ctx, name, data)
+		}
+	}
 	go func() {
 		for e := range scan.Events() {
 			switch e.Kind {
-			case jobs.KindProgress, jobs.KindLog, jobs.KindSourceStarted:
-				rt.EventsEmit(a.ctx, "scan:progress", map[string]any{
+			case jobs.KindProgress, jobs.KindLog, jobs.KindSourceStarted, jobs.KindSourceDone:
+				emit("scan:progress", map[string]any{
 					"phase": e.Phase, "message": e.Message, "done": e.Done, "total": e.Total,
 				})
-			case jobs.KindSourceDone:
-				rt.EventsEmit(a.ctx, "scan:source", e.Source)
 			}
 		}
 		if err := scan.Wait(); err != nil {
-			rt.EventsEmit(a.ctx, "scan:error", err.Error())
+			a.mu.Lock()
+			canceled := a.scanCanceled
+			a.mu.Unlock()
+			if canceled || errors.Is(err, context.Canceled) {
+				emit("scan:canceled", nil)
+			} else {
+				emit("scan:error", err.Error())
+			}
 			return
 		}
-		a.index(scan.Diagnosis(), scan.Result())
+		if !a.index(scan) {
+			return
+		}
 		a.mu.Lock()
 		done := ScanDone{Diagnosis: a.diag, Result: a.result}
 		a.mu.Unlock()
-		rt.EventsEmit(a.ctx, "scan:done", done)
+		emit("scan:done", done)
 	}()
 }
 
-func (a *App) index(diag *model.Diagnosis, res model.ScanResult) {
+// CancelScan stops an in-progress scan; the scan goroutine emits scan:canceled.
+func (a *App) CancelScan() {
+	a.mu.Lock()
+	s := a.scan
+	a.scanCanceled = true
+	a.mu.Unlock()
+	if s != nil {
+		s.Cancel()
+	}
+}
+
+// index records a finished scan's results, unless the scan was superseded.
+func (a *App) index(scan *session.Scan) bool {
+	diag, res := scan.Diagnosis(), scan.Result()
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.scan != scan {
+		return false
+	}
 	a.diag = diag
 	a.result = res
 	for _, s := range res.Sources {
@@ -335,6 +534,7 @@ func (a *App) index(diag *model.Diagnosis, res model.ScanResult) {
 			indexTree(s.Root, s.ID, a.filesByID)
 		}
 	}
+	return true
 }
 
 func indexTree(n *model.Node, sourceID string, m map[string]fileRef) {
@@ -363,8 +563,16 @@ func (a *App) Preview(sourceID, fileID string) (PreviewDTO, error) {
 	source, okS := a.sourcesByID[sourceID]
 	ref, okF := a.filesByID[fileID]
 	a.mu.Unlock()
-	if src == nil || !okS || !okF {
+	if src == nil || !okS || !okF || ref.sourceID != sourceID {
 		return PreviewDTO{}, fmt.Errorf("preview: file not found")
+	}
+	// Wails runs each call on its own goroutine; cap concurrent decodes so a
+	// grid full of large photos can't exhaust memory.
+	select {
+	case a.previewSlots <- struct{}{}:
+		defer func() { <-a.previewSlots }()
+	case <-a.ctx.Done():
+		return PreviewDTO{}, a.ctx.Err()
 	}
 	p := recovery.Preview(a.ctx, src, source, ref.file, config.Get().Preview.MaxDimension)
 	dto := PreviewDTO{Kind: string(p.Kind), Status: string(p.Status), Note: p.Note, Width: p.Width, Height: p.Height}
@@ -390,12 +598,15 @@ type RecoverDTO struct {
 
 // Recover extracts the selected files (all from one source) to destDir.
 func (a *App) Recover(sourceID string, fileIDs []string, destDir string, preservePaths bool) (RecoverDTO, error) {
+	if !filepath.IsAbs(destDir) {
+		return RecoverDTO{}, fmt.Errorf("choose a destination folder (a full path such as /Users/you/Recovered)")
+	}
 	a.mu.Lock()
 	src := a.src
 	source, okS := a.sourcesByID[sourceID]
 	var files []model.RecoveredFile
 	for _, id := range fileIDs {
-		if ref, ok := a.filesByID[id]; ok {
+		if ref, ok := a.filesByID[id]; ok && ref.sourceID == sourceID {
 			files = append(files, ref.file)
 		}
 	}

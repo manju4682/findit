@@ -6,15 +6,18 @@ package session
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
+	"time"
 
-	"github.com/findit/findit/internal/carve"
-	"github.com/findit/findit/internal/config"
-	"github.com/findit/findit/internal/diagnosis"
-	"github.com/findit/findit/internal/engines/tsk"
-	"github.com/findit/findit/internal/jobs"
-	"github.com/findit/findit/internal/model"
-	"github.com/findit/findit/internal/storage"
+	"github.com/manju4682/findit/internal/bytescan"
+	"github.com/manju4682/findit/internal/carve"
+	"github.com/manju4682/findit/internal/config"
+	"github.com/manju4682/findit/internal/diagnosis"
+	"github.com/manju4682/findit/internal/engines/tsk"
+	"github.com/manju4682/findit/internal/jobs"
+	"github.com/manju4682/findit/internal/model"
+	"github.com/manju4682/findit/internal/storage"
 )
 
 // Scan is a running recovery scan: a Job plus the diagnosis and per-source
@@ -57,22 +60,63 @@ func (s *Scan) addSource(rs model.RecoverySource) {
 
 // StartScan begins a scan and returns immediately. Consumers drain Events()
 // until closed, then read Result().
+//
+// Diagnosis and raw carving share a single streaming pass over the source: both
+// inspect the same windows, so a multi-gigabyte drive is read once, not twice.
 func StartScan(parent context.Context, src storage.Source, req model.ScanRequest) *Scan {
 	s := &Scan{}
 	s.Job = jobs.Run(parent, config.Get().Scan.EventBufferSize, func(ctx context.Context, emit func(jobs.Event)) error {
-		emit(jobs.Event{Kind: jobs.KindProgress, Phase: "diagnose", Message: "Analyzing the drive…"})
-		diag, err := diagnosis.DiagnoseSource(src)
+		emit(jobs.Event{Kind: jobs.KindProgress, Phase: "scan", Message: "Analyzing the drive…"})
+
+		prep, err := diagnosis.Prepare(src)
 		if err != nil {
 			return fmt.Errorf("diagnosis failed: %w", err)
 		}
+		scanner := prep.NewScanner()
+		finder := carve.NewFinder(req.RawExtensions)
+		wantRaw := req.Raw && finder.Active()
+
+		overlap := scanner.Overlap()
+		if wantRaw && finder.Overlap() > overlap {
+			overlap = finder.Overlap()
+		}
+
+		total := src.Size()
+		progress := progressEmitter(emit, "scan", "Analyzing the drive")
+		// A failing drive shouldn't end the scan: unreadable areas read as zeros.
+		var unreadable int64
+		tolerant := storage.Tolerant(src, func(_, n int64) {
+			if unreadable == 0 {
+				emit(jobs.Event{Kind: jobs.KindLog, Phase: "scan",
+					Message: "Some areas of the drive can’t be read — skipping them and continuing."})
+			}
+			unreadable += n
+		})
+		err = bytescan.Scan(ctx, io.NewSectionReader(tolerant, 0, total), overlap, func(win []byte, base int64, safe int) {
+			scanner.Visit(win, base, safe)
+			if wantRaw {
+				finder.Visit(win, base, safe)
+			}
+			progress(base+int64(safe), total)
+		})
+		if err != nil {
+			return err
+		}
+
+		diag := prep.Build(scanner)
+		if unreadable > 0 {
+			msg := fmt.Sprintf("About %s of the drive couldn’t be read, so files stored there may be missing or damaged. If the drive is failing, make a safe copy before trying again.", humanMB(unreadable))
+			emit(jobs.Event{Kind: jobs.KindLog, Phase: "scan", Message: msg})
+			diag.Narrative += " " + msg
+		}
 		s.setDiag(diag)
-		emit(jobs.Event{Kind: jobs.KindProgress, Phase: "diagnose", Message: diag.Narrative})
+		emit(jobs.Event{Kind: jobs.KindProgress, Phase: "scan", Message: diag.Narrative})
 
 		if err := s.enumerateFilesystems(ctx, src, diag, req, emit); err != nil {
 			return err
 		}
-		if req.Raw && len(req.RawExtensions) > 0 {
-			if err := s.carveRaw(ctx, src, req, emit); err != nil {
+		if wantRaw {
+			if err := s.assembleRaw(ctx, src, finder, emit); err != nil {
 				return err
 			}
 		}
@@ -94,11 +138,11 @@ func (s *Scan) enumerateFilesystems(ctx context.Context, src storage.Source, dia
 				Message: "The Sleuth Kit is not installed; skipping filesystem enumeration."})
 			continue
 		}
-		eng := tsk.New(src.Name(), tgt.offset, tgt.fsType)
+		eng := tsk.ForSource(src, tgt.offset, tgt.fsType)
 		fsSrc, err := eng.Enumerate(ctx)
 		if err != nil {
 			emit(jobs.Event{Kind: jobs.KindLog, Phase: "enumerate",
-				Message: fmt.Sprintf("Couldn't read the %s structure; raw recovery may still find files.", tgt.fsType)})
+				Message: fmt.Sprintf("Couldn't read the %s filesystem directly; raw recovery still works. (%v)", tgt.fsType, err)})
 			continue
 		}
 		fsSrc.Confidence = tgt.conf
@@ -113,9 +157,11 @@ func (s *Scan) enumerateFilesystems(ctx context.Context, src storage.Source, dia
 	return nil
 }
 
-func (s *Scan) carveRaw(ctx context.Context, src storage.Source, req model.ScanRequest, emit func(jobs.Event)) error {
-	emit(jobs.Event{Kind: jobs.KindSourceStarted, Phase: "carve", Message: "Scanning for files by content…"})
-	carved, err := carve.Scan(ctx, src, req.RawExtensions)
+// assembleRaw turns the signatures collected during the shared pass into a raw
+// RecoverySource (measuring + verifying each candidate).
+func (s *Scan) assembleRaw(ctx context.Context, src storage.Source, finder *carve.Finder, emit func(jobs.Event)) error {
+	emit(jobs.Event{Kind: jobs.KindSourceStarted, Phase: "carve", Message: "Assembling files found by content…"})
+	carved, err := finder.Measure(ctx, src)
 	if err != nil {
 		return fmt.Errorf("raw scan failed: %w", err)
 	}
@@ -124,6 +170,33 @@ func (s *Scan) carveRaw(ctx context.Context, src storage.Source, req model.ScanR
 	emit(jobs.Event{Kind: jobs.KindSourceDone, Phase: "carve", Source: &raw,
 		Message: fmt.Sprintf("Found %d file(s) by content.", raw.FileCount)})
 	return nil
+}
+
+// progressEmitter returns a throttled progress callback that emits scan progress
+// (in MB) at most a few times a second, so a multi-gigabyte pass shows movement
+// without flooding the event stream.
+func progressEmitter(emit func(jobs.Event), phase, label string) func(done, total int64) {
+	var last time.Time
+	return func(done, total int64) {
+		if total <= 0 {
+			return
+		}
+		now := time.Now()
+		if done < total && now.Sub(last) < 300*time.Millisecond {
+			return
+		}
+		last = now
+		emit(jobs.Event{
+			Kind: jobs.KindProgress, Phase: phase,
+			Done: int(done / (1 << 20)), Total: int(total / (1 << 20)),
+			Message: fmt.Sprintf("%s… %d / %d MB", label, done/(1<<20), total/(1<<20)),
+		})
+	}
+}
+
+// humanMB formats a byte count in the MB units used by scan progress.
+func humanMB(n int64) string {
+	return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
 }
 
 // target is a filesystem to enumerate at a specific offset.

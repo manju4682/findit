@@ -1,12 +1,19 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
-  "name": "findit",
+  "name": "FindIt",
   "outputfilename": "FindIt",
   "frontend:install": "npm install",
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
   "author": {
-    "name": "FindIt"
+    "name": "FindIt contributors"
+  },
+  "info": {
+    "companyName": "FindIt",
+    "productName": "FindIt",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright © FindIt contributors. Licensed under Apache-2.0.",
+    "comments": "Recover your files — a friendly layer over proven recovery engines."
   }
 }

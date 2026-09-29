@@ -7,18 +7,17 @@ package carve
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/binary"
-	"image"
-	_ "image/jpeg" // register JPEG decoder for image.Decode
-	_ "image/png"  // register PNG decoder for image.Decode
 	"io"
 	"sort"
 
-	"github.com/findit/findit/internal/bytescan"
-	"github.com/findit/findit/internal/config"
-	"github.com/findit/findit/internal/storage"
+	"github.com/manju4682/findit/internal/bytescan"
+	"github.com/manju4682/findit/internal/config"
+	"github.com/manju4682/findit/internal/safeimage"
+	"github.com/manju4682/findit/internal/storage"
 )
 
 // maxFileSize caps how far carving follows a single file, bounding work on
@@ -78,14 +77,76 @@ type Carved struct {
 // signature are ignored. Results are ordered by offset and non-overlapping (a
 // signature inside an already-measured file is skipped).
 func Scan(ctx context.Context, src storage.Source, exts []string) ([]Carved, error) {
-	active := activeSignatures(exts)
-	if len(active) == 0 {
+	return ScanWithProgress(ctx, src, exts, nil)
+}
+
+// ScanWithProgress is Scan with a progress callback (done, total bytes), called
+// during the initial signature-scanning pass over the whole source.
+func ScanWithProgress(ctx context.Context, src storage.Source, exts []string, progress func(done, total int64)) ([]Carved, error) {
+	f := NewFinder(exts)
+	if !f.Active() {
 		return nil, nil
 	}
-	starts, err := findStarts(src, active)
+	size := src.Size()
+	err := bytescan.Scan(ctx, storage.Reader(src), f.Overlap(), func(win []byte, base int64, safe int) {
+		f.Visit(win, base, safe)
+		if progress != nil {
+			progress(base+int64(safe), size)
+		}
+	})
 	if err != nil {
 		return nil, err
 	}
+	return f.Measure(ctx, src)
+}
+
+// Finder collects candidate signature start offsets from streamed windows, so a
+// carve can share one streaming pass with diagnosis. After the pass, call
+// Measure to turn the collected starts into carved files.
+type Finder struct {
+	active  []*Signature
+	overlap int
+	starts  []start
+}
+
+// NewFinder returns a Finder for the given extensions (unknown ones ignored).
+func NewFinder(exts []string) *Finder {
+	active := activeSignatures(exts)
+	overlap := 32
+	for _, s := range active {
+		if l := len(s.Magic) + s.MagicOffset + 8; l > overlap {
+			overlap = l
+		}
+	}
+	return &Finder{active: active, overlap: overlap}
+}
+
+// Active reports whether any known extension was requested.
+func (f *Finder) Active() bool { return len(f.active) > 0 }
+
+// Overlap is the trailing overlap the finder needs between windows.
+func (f *Finder) Overlap() int { return f.overlap }
+
+// Visit collects signature starts from one streamed window.
+func (f *Finder) Visit(win []byte, base int64, safe int) {
+	region := win[:safe]
+	for _, s := range f.active {
+		for _, p := range bytescan.IndexAll(region, s.Magic) {
+			if off := base + int64(p) - int64(s.MagicOffset); off >= 0 {
+				f.starts = append(f.starts, start{s, off})
+			}
+		}
+	}
+}
+
+// Measure turns the collected starts into carved files (measuring + verifying).
+func (f *Finder) Measure(ctx context.Context, src storage.Source) ([]Carved, error) {
+	return measureStarts(ctx, src, f.starts)
+}
+
+// measureStarts measures and verifies each candidate start into a Carved file,
+// skipping signatures that fall inside an already-measured file.
+func measureStarts(ctx context.Context, src storage.Source, starts []start) ([]Carved, error) {
 	sort.Slice(starts, func(i, j int) bool { return starts[i].off < starts[j].off })
 
 	size := src.Size()
@@ -134,29 +195,6 @@ type start struct {
 	off int64
 }
 
-// findStarts streams the source once to collect candidate start offsets for all
-// active signatures.
-func findStarts(src storage.Source, active []*Signature) ([]start, error) {
-	overlap := 32
-	for _, s := range active {
-		if l := len(s.Magic) + s.MagicOffset + 8; l > overlap {
-			overlap = l
-		}
-	}
-	var starts []start
-	err := bytescan.Scan(storage.Reader(src), overlap, func(win []byte, base int64, safe int) {
-		region := win[:safe]
-		for _, s := range active {
-			for _, p := range bytescan.IndexAll(region, s.Magic) {
-				if off := base + int64(p) - int64(s.MagicOffset); off >= 0 {
-					starts = append(starts, start{s, off})
-				}
-			}
-		}
-	})
-	return starts, err
-}
-
 // findLastSignature returns the absolute offset of the last occurrence of needle
 // within [off, off+maxFileSize), or -1. Used to locate trailing markers (PDF
 // %%EOF, ZIP end-of-central-directory).
@@ -167,7 +205,7 @@ func findLastSignature(src storage.Source, off, size int64, needle []byte) int64
 	}
 	sec := io.NewSectionReader(src, off, end-off)
 	last := int64(-1)
-	_ = bytescan.Scan(sec, len(needle)+4, func(win []byte, base int64, safe int) {
+	_ = bytescan.Scan(context.Background(), sec, len(needle)+4, func(win []byte, base int64, safe int) {
 		for _, p := range bytescan.IndexAll(win[:safe], needle) {
 			if abs := off + base + int64(p); abs > last {
 				last = abs
@@ -177,9 +215,10 @@ func findLastSignature(src storage.Source, off, size int64, needle []byte) int64
 	return last
 }
 
-// measureJPEG walks from the SOI marker to the first EOI (FFD9). To reject
-// coincidental FFD8FF…FFD9 byte sequences it requires a plausible first marker
-// after the SOI and an SOS (start-of-scan, FFDA) marker before the EOI.
+// measureJPEG walks the JPEG marker segments from SOI to EOI. Segments are
+// skipped by their declared length, so an EXIF thumbnail (a complete JPEG
+// embedded in APP1, which nearly every camera writes) doesn't end the file
+// early. Entropy-coded data after each SOS is scanned for the next marker.
 func measureJPEG(src storage.Source, size, off int64) (int64, bool) {
 	var head [4]byte
 	if _, err := src.ReadAt(head[:], off); err != nil {
@@ -188,32 +227,69 @@ func measureJPEG(src storage.Source, size, off int64) (int64, bool) {
 	if head[0] != 0xFF || head[1] != 0xD8 || head[2] != 0xFF || !validFirstMarker(head[3]) {
 		return 0, false
 	}
-	buf := make([]byte, 64<<10)
-	pos := off + 2
-	var prevFF, sawSOS bool
-	for pos < size && pos-off < maxFileSize {
-		n, err := src.ReadAt(buf, pos)
-		if n <= 0 {
-			break
+	r := bufio.NewReaderSize(io.NewSectionReader(src, off, min(size-off, maxFileSize)), 64<<10)
+	pos := int64(2)
+	if _, err := r.Discard(2); err != nil {
+		return 0, false
+	}
+	next := func() (byte, bool) {
+		b, err := r.ReadByte()
+		pos++
+		return b, err == nil
+	}
+
+	inScan, sawSOS := false, false
+	for {
+		b, ok := next()
+		if !ok {
+			return 0, false
 		}
-		for i := 0; i < n; i++ {
-			c := buf[i]
-			if prevFF {
-				if c == 0xDA {
-					sawSOS = true
-				}
-				if c == 0xD9 && sawSOS {
-					return (pos + int64(i) + 1) - off, true
-				}
+		if b != 0xFF {
+			if inScan {
+				continue // entropy-coded data
 			}
-			prevFF = c == 0xFF
+			return 0, false // garbage where a marker should be
 		}
+		m, ok := next()
+		for ok && m == 0xFF { // fill bytes
+			m, ok = next()
+		}
+		if !ok {
+			return 0, false
+		}
+		switch {
+		case m == 0x00: // stuffed 0xFF inside entropy-coded data
+			if !inScan {
+				return 0, false
+			}
+			continue
+		case m >= 0xD0 && m <= 0xD7, m == 0x01: // RSTn / TEM: no length field
+			continue
+		case m == 0xD9: // EOI
+			if !sawSOS {
+				return 0, false
+			}
+			return pos, true
+		case m == 0xD8: // a new image starts: this one was cut short
+			if !sawSOS {
+				return 0, false
+			}
+			return pos - 2, false
+		}
+		hi, ok1 := next()
+		lo, ok2 := next()
+		segLen := int(hi)<<8 | int(lo)
+		if !ok1 || !ok2 || segLen < 2 {
+			return 0, false
+		}
+		n, err := r.Discard(segLen - 2)
 		pos += int64(n)
 		if err != nil {
-			break
+			return 0, false
 		}
+		inScan = m == 0xDA
+		sawSOS = sawSOS || inScan
 	}
-	return 0, false
 }
 
 // validFirstMarker reports whether b is a JPEG marker that legitimately follows
@@ -234,22 +310,39 @@ func verifyImage(src storage.Source, off, length int64) bool {
 	if cap := config.Get().Carve.MaxVerifyBytes; cap > 0 && length > cap {
 		return true
 	}
-	if _, _, err := image.Decode(io.NewSectionReader(src, off, length)); err != nil {
+	if _, err := safeimage.Decode(io.NewSectionReader(src, off, length)); err != nil {
 		return false
 	}
 	return true
 }
 
-// verifyZIP confirms a carved archive's central directory parses (covering
-// zip/docx/xlsx/jar), catching fragmented or truncated archives whose signatures
-// survived but whose index did not. It reads the directory only, never
-// decompressing, so it stays cheap.
+// verifyZIP confirms a carved archive is actually readable (covering
+// zip/docx/xlsx/jar): its central directory must parse (which also rejects a
+// mis-measured carve whose length grabbed an unrelated end-of-directory record),
+// and each entry must decompress with a matching CRC up to the configured cap.
 func verifyZIP(src storage.Source, off, length int64) bool {
-	if cap := config.Get().Carve.MaxVerifyBytes; cap > 0 && length > cap {
-		return true
+	zr, err := zip.NewReader(io.NewSectionReader(src, off, length), length)
+	if err != nil || len(zr.File) == 0 {
+		return false
 	}
-	_, err := zip.NewReader(io.NewSectionReader(src, off, length), length)
-	return err == nil
+	capBytes := config.Get().Carve.MaxVerifyBytes
+	var read int64
+	for _, f := range zr.File {
+		if capBytes > 0 && read >= capBytes {
+			break // verified enough entries; trust the rest
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return false
+		}
+		n, err := io.Copy(io.Discard, rc) // surfaces zip.ErrChecksum on corruption
+		_ = rc.Close()
+		if err != nil {
+			return false
+		}
+		read += n
+	}
+	return true
 }
 
 // verifyPDF checks a carved PDF has a version header and a cross-reference

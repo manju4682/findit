@@ -30,6 +30,10 @@ func (a *alignedReaderAt) ReadAt(p []byte, off int64) (int, error) {
 	if end > a.size {
 		end = a.size
 	}
+	// Aligned, in-range reads (the sequential scan's common case) skip the bounce buffer.
+	if off%a.bs == 0 && int64(len(p))%a.bs == 0 && end == off+int64(len(p)) {
+		return a.ra.ReadAt(p, off)
+	}
 	start := off - off%a.bs
 	alignedEnd := ((end + a.bs - 1) / a.bs) * a.bs
 

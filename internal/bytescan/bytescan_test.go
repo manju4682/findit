@@ -2,6 +2,7 @@ package bytescan
 
 import (
 	"bytes"
+	"context"
 	"reflect"
 	"testing"
 )
@@ -33,7 +34,7 @@ func TestScan_AcrossBoundary(t *testing.T) {
 	}
 
 	var found []int
-	err := Scan(bytes.NewReader(data), 16, func(win []byte, base int64, safe int) {
+	err := Scan(context.Background(), bytes.NewReader(data), 16, func(win []byte, base int64, safe int) {
 		for _, p := range IndexAll(win[:safe], needle) {
 			found = append(found, int(base)+p)
 		}

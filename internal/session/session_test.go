@@ -2,13 +2,15 @@ package session
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
-	"github.com/findit/findit/internal/engines/tsk"
-	"github.com/findit/findit/internal/jobs"
-	"github.com/findit/findit/internal/model"
-	"github.com/findit/findit/internal/storage"
-	"github.com/findit/findit/internal/testutil"
+	"github.com/manju4682/findit/internal/engines/tsk"
+	"github.com/manju4682/findit/internal/jobs"
+	"github.com/manju4682/findit/internal/model"
+	"github.com/manju4682/findit/internal/storage"
+	"github.com/manju4682/findit/internal/testutil"
 )
 
 func openFixture(t *testing.T, name string) storage.Source {
@@ -31,6 +33,41 @@ func hasKind(evs []jobs.Event, k jobs.Kind) bool {
 		}
 	}
 	return false
+}
+
+// badRegionSource wraps a Source and fails reads touching one byte range, like
+// a drive with an unreadable sector.
+type badRegionSource struct {
+	storage.Source
+	off, n int64
+}
+
+func (b badRegionSource) ReadAt(p []byte, off int64) (int, error) {
+	if off < b.off+b.n && off+int64(len(p)) > b.off {
+		return 0, errors.New("input/output error")
+	}
+	return b.Source.ReadAt(p, off)
+}
+
+// TestStartScan_SurvivesUnreadableArea proves one bad sector no longer aborts
+// the scan: it completes, still carves media elsewhere, and tells the user.
+func TestStartScan_SurvivesUnreadableArea(t *testing.T) {
+	src := badRegionSource{Source: openFixture(t, "changed_fs_fat32_to_exfat.bin"), off: 100 << 20, n: 512}
+	s := StartScan(context.Background(), src, model.ScanRequest{Raw: true, RawExtensions: []string{"jpg"}})
+	evs := drain(s)
+	if err := s.Wait(); err != nil {
+		t.Fatalf("scan failed on an unreadable sector: %v", err)
+	}
+	warned := false
+	for _, e := range evs {
+		warned = warned || (e.Kind == jobs.KindLog && strings.Contains(e.Message, "couldn’t be read"))
+	}
+	if !warned {
+		t.Error("expected a log event about the unreadable area")
+	}
+	if res := s.Result(); len(res.Sources) != 1 || res.Sources[0].FileCount == 0 {
+		t.Errorf("expected carved files despite the bad area, got %+v", res.Sources)
+	}
 }
 
 func TestStartScan_RawSourceOnChangedFilesystem(t *testing.T) {
