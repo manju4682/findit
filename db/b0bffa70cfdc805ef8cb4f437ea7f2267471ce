@@ -1,0 +1,28 @@
+docs/index.html
+  s_6b4d9734768cf0::t_5b2b0635c9c1e4 65,85,228,338,373,402,436,452
+docs/app.js
+  s_6b4d9734768cf0::t_65e8362b7472cd 241
+docs/styles.css
+  h_0a6124cd6bde1e 78,142,146,169,295-296,343-344
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dbb0bffa70cfdc805ef8cb4f437ea7f2267471ce",
+  "prompts": {},
+  "humans": {
+    "h_0a6124cd6bde1e": {
+      "author": "Manjunath Tadlagi (mtadlagi) <mtadlagi@cisco.com>"
+    }
+  },
+  "sessions": {
+    "s_6b4d9734768cf0": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "42c62b48-4f7e-4a98-bdfb-59d84af1fdd5",
+        "model": "claude-opus-5.5"
+      },
+      "human_author": "Manjunath Tadlagi (mtadlagi) <mtadlagi@cisco.com>"
+    }
+  }
+}
