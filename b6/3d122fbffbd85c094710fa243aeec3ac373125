@@ -1,0 +1,29 @@
+README.md
+  s_6b4d9734768cf0::t_cba0c01a482e9e 20-21
+scripts/build_dmg.sh
+  s_6b4d9734768cf0::t_38bc2cf619749a 58-64
+.github/workflows/ci.yml
+  s_6b4d9734768cf0::t_7e89330466cce0 7-13,60-89,97-147
+  s_6b4d9734768cf0::t_7fd49f36ffe561 90-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b63d122fbffbd85c094710fa243aeec3ac373125",
+  "prompts": {},
+  "humans": {
+    "h_0a6124cd6bde1e": {
+      "author": "Manjunath Tadlagi (mtadlagi) <mtadlagi@cisco.com>"
+    }
+  },
+  "sessions": {
+    "s_6b4d9734768cf0": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "42c62b48-4f7e-4a98-bdfb-59d84af1fdd5",
+        "model": "claude-opus-5.5"
+      },
+      "human_author": "Manjunath Tadlagi (mtadlagi) <mtadlagi@cisco.com>"
+    }
+  }
+}
