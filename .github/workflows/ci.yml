@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version part to bump for the release
+        type: choice
+        options: [patch, minor, major]
+        default: patch
 
 permissions:
   contents: read
@@ -50,3 +57,91 @@ jobs:
 
       - name: Vulnerability check
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  # Every push to main (i.e. every merge) that passes the tests is released as
+  # the next patch version, with FindIt.dmg attached. Run the workflow manually
+  # to bump the minor or major version instead.
+  release:
+    needs: test
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: macos-latest # Apple Silicon, matching the bundled engines
+    permissions:
+      contents: write
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags are needed to pick the next version
+
+      - name: Pick the next version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump || 'patch' }}
+        run: |
+          existing=$(git tag --points-at HEAD --list 'v*' | head -1)
+          if [[ -n "$existing" ]]; then
+            echo "::notice::This commit was already released as $existing"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          last=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+          # Merges that only touch docs since the last release don't ship a new DMG.
+          if [[ -n "$last" && "$GITHUB_EVENT_NAME" == push ]] &&
+            ! git diff --name-only "$last" HEAD | grep -qvE '(\.md$|^LICENSE$|^docs/)'; then
+            echo "::notice::Only documentation changed since $last; skipping release"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          IFS=. read -r major minor patch <<< "${last:-v0.0.0}"
+          major=${major#v}
+          case "$BUMP" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            *)     patch=$((patch + 1)) ;;
+          esac
+          echo "version=$major.$minor.$patch" >> "$GITHUB_OUTPUT"
+          echo "tag=v$major.$minor.$patch" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$major.$minor.$patch (previous: ${last:-none})"
+
+      - uses: actions/setup-go@v5
+        if: steps.version.outputs.skip != 'true'
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        if: steps.version.outputs.skip != 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install build tools
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          go install "github.com/wailsapp/wails/v2/cmd/wails@$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)"
+          brew install sleuthkit
+
+      - name: Stamp the version into the app
+        if: steps.version.outputs.skip != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          jq --arg v "$VERSION" '.info.productVersion = $v' wails.json > wails.json.tmp
+          mv wails.json.tmp wails.json
+
+      - name: Build FindIt.dmg
+        if: steps.version.outputs.skip != 'true'
+        run: scripts/build_dmg.sh
+
+      - name: Publish release
+        if: steps.version.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" build/FindIt.dmg \
+            --target "$GITHUB_SHA" \
+            --title "FindIt $TAG" \
+            --generate-notes

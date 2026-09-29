@@ -55,7 +55,13 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
-hdiutil create -volname "$VOL" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+# hdiutil occasionally fails with "Resource busy" (common on CI runners); retry.
+for attempt in 1 2 3; do
+  hdiutil create -volname "$VOL" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null && break
+  echo "hdiutil failed (attempt $attempt); retrying…" >&2
+  sleep 5
+done
+[[ -f "$DMG" ]] || { echo "could not create $DMG" >&2; exit 1; }
 
 if [[ "$IDENTITY" != "-" ]]; then
   sign "$DMG"

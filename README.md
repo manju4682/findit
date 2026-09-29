@@ -17,7 +17,8 @@ guided workflow, previews, and honest per-file assessment.**
 
 Requires macOS 12 or later on Apple Silicon.
 
-1. Download **`FindIt.dmg`** from the [Releases](../../releases) page.
+1. Download **[`FindIt.dmg`](../../releases/latest/download/FindIt.dmg)** from the
+   latest [release](../../releases/latest).
 2. Open it and drag **FindIt** to Applications.
 3. First launch: FindIt isn't notarized yet, so macOS blocks it once. Open
    **System Settings → Privacy & Security**, scroll to the message about
