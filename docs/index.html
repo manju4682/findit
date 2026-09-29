@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FindIt — Get your files back on Mac, without the jargon</title>
+    <meta
+      name="description"
+      content="Drive suddenly empty, reformatted, or files deleted? FindIt looks underneath what your Mac sees, previews what can be saved, and brings it back. Free, open source, read-only and offline."
+    />
+    <meta name="theme-color" content="#2563eb" />
+    <link rel="icon" type="image/png" href="assets/favicon.png" />
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="FindIt — your files aren’t gone" />
+    <meta
+      property="og:description"
+      content="Free, open-source data recovery for Mac. Finds earlier filesystems, previews photos and videos, and never writes to your drive."
+    />
+    <meta property="og:image" content="https://manju4682.github.io/findit/assets/og-image.jpg" />
+    <meta property="og:url" content="https://manju4682.github.io/findit/" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <link rel="stylesheet" href="styles.css" />
+    <script>document.documentElement.classList.add('js')</script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <!-- NAV -->
+    <header class="nav" id="top">
+      <div class="nav__inner container">
+        <a class="brand" href="#top" aria-label="FindIt home">
+          <img src="assets/icon.png" alt="" width="32" height="32" />
+          <span>FindIt</span>
+        </a>
+        <nav class="nav__links" aria-label="Sections">
+          <a href="#how">How it works</a>
+          <a href="#features">Features</a>
+          <a href="#safety">Safety</a>
+          <a href="#faq">FAQ</a>
+          <a href="https://github.com/manju4682/findit" rel="noopener">GitHub</a>
+        </nav>
+        <a class="btn btn--primary btn--sm" href="https://github.com/manju4682/findit/releases/latest" rel="noopener">
+          Download
+        </a>
+      </div>
+    </header>
+
+    <main id="main">
+      <!-- HERO -->
+      <section class="hero">
+        <div class="hero__bg" aria-hidden="true">
+          <span class="blob blob--1"></span>
+          <span class="blob blob--2"></span>
+          <span class="blob blob--3"></span>
+          <span class="grid-fade"></span>
+        </div>
+
+        <div class="container hero__inner">
+          <div class="hero__copy">
+            <p class="pill reveal">
+              <span class="pill__dot"></span> Free &amp; open source · for Mac
+              <span class="pill__version" data-version hidden></span>
+            </p>
+            <h1 class="reveal" style="--d: 80ms">
+              Your files aren’t gone.<br />
+              <span class="gradient-text">Let’s find them.</span>
+            </h1>
+            <p class="lead reveal" style="--d: 160ms">
+              USB stick suddenly empty? Card reformatted by mistake? Files deleted? FindIt looks underneath what
+              your Mac shows you, previews what can still be saved, and brings it back — in plain English, no
+              expertise needed.
+            </p>
+            <div class="hero__cta reveal" style="--d: 240ms">
+              <a class="btn btn--primary btn--lg" href="https://github.com/manju4682/findit/releases/latest" rel="noopener">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.37 12.3c-.02-2.3 1.88-3.4 1.97-3.46-1.07-1.57-2.74-1.78-3.33-1.8-1.42-.14-2.77.83-3.49.83-.72 0-1.83-.81-3.01-.79-1.55.02-2.98.9-3.78 2.29-1.61 2.8-.41 6.93 1.16 9.2.77 1.1 1.68 2.35 2.88 2.3 1.16-.05 1.6-.75 3-.75s1.8.75 3.02.72c1.25-.02 2.04-1.12 2.8-2.23.88-1.28 1.24-2.53 1.26-2.59-.03-.01-2.42-.93-2.48-3.72zM14.07 5.54c.64-.78 1.07-1.85.95-2.92-.92.04-2.03.61-2.69 1.38-.59.68-1.1 1.77-.97 2.82 1.03.08 2.07-.52 2.71-1.28z"/></svg>
+                Download for Mac
+              </a>
+              <a class="btn btn--ghost btn--lg" href="#how">See how it works</a>
+            </div>
+            <p class="hero__meta reveal" style="--d: 320ms">
+              macOS 12+ · Apple Silicon · <span data-size>~11 MB</span> · No account · Works offline
+            </p>
+          </div>
+
+          <div class="hero__visual reveal" style="--d: 200ms">
+            <div class="window tilt" data-tilt>
+              <span class="window__lights" aria-hidden="true"><i></i><i></i><i></i></span>
+              <img
+                src="assets/shot-results.webp"
+                width="2300"
+                height="1520"
+                alt="FindIt showing photos recovered from an earlier FAT32 filesystem, with six selected for recovery"
+              />
+            </div>
+            <div class="float float--a" aria-hidden="true">
+              <span class="float__icon float__icon--violet">⌁</span>
+              <div><b>Earlier FAT32 found</b><small>underneath the current exFAT</small></div>
+            </div>
+            <div class="float float--b" aria-hidden="true">
+              <span class="float__icon float__icon--green">✓</span>
+              <div><b>110 files recoverable</b><small>with previews</small></div>
+            </div>
+            <div class="float float--c" aria-hidden="true">
+              <span class="float__icon float__icon--blue">🔒</span>
+              <div><b>Read-only</b><small>your drive is never changed</small></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PROBLEMS -->
+      <section class="section" id="usecases">
+        <div class="container">
+          <header class="section__head reveal">
+            <p class="eyebrow">Sound familiar?</p>
+            <h2>When a drive “loses” your files, they’re usually still there.</h2>
+            <p class="muted">
+              Deleting or reformatting mostly erases the <em>index</em>, not the data. Until something new is written
+              over it, your photos, videos and documents are still sitting on the drive — FindIt knows where to look.
+            </p>
+          </header>
+          <div class="cards cards--4">
+            <article class="card reveal" style="--d: 0ms">
+              <div class="card__icon">🫥</div>
+              <h3>It suddenly looks empty</h3>
+              <p>You plug in the USB stick or SD card and Finder shows nothing — or asks to initialize it.</p>
+            </article>
+            <article class="card reveal" style="--d: 80ms">
+              <div class="card__icon">🔁</div>
+              <h3>It was reformatted</h3>
+              <p>Someone clicked “Erase”, or the drive changed from NTFS to exFAT. The old files sit underneath.</p>
+            </article>
+            <article class="card reveal" style="--d: 160ms">
+              <div class="card__icon">🗑️</div>
+              <h3>Files were deleted</h3>
+              <p>An accidental delete, an emptied Trash, a camera that “cleared” the card.</p>
+            </article>
+            <article class="card reveal" style="--d: 240ms">
+              <div class="card__icon">⚠️</div>
+              <h3>It started acting up</h3>
+              <p>Corruption or a failing drive. FindIt copies what it can and tells you what it couldn’t read.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- DIAGNOSIS DEMO -->
+      <section class="section section--tint" id="diagnosis">
+        <div class="container split">
+          <div class="split__text reveal">
+            <p class="eyebrow">Automatic diagnosis</p>
+            <h2>It tells you what happened — in plain English.</h2>
+            <p class="muted">
+              FindIt reads the whole drive once and works out what’s on it: the filesystem you see today, any
+              <b>earlier filesystems hiding underneath</b>, and every photo and video it can recognize by its content.
+              No partitions, sectors or MFTs to understand.
+            </p>
+            <ul class="ticks">
+              <li>Detects NTFS, exFAT and FAT32 — including ones that were formatted over</li>
+              <li>Understands partitioned drives (MBR and GPT)</li>
+              <li>Keeps every place it found files separate, so nothing gets mixed up</li>
+            </ul>
+          </div>
+
+          <div class="scan reveal" style="--d: 120ms" data-scan>
+            <div class="scan__top">
+              <span class="scan__title">SanDisk Ultra USB 3.0 · 64 GB</span>
+              <button class="scan__replay" type="button" data-scan-replay aria-label="Replay the scan animation">↻ Replay</button>
+            </div>
+            <div class="disk" data-disk aria-hidden="true"></div>
+            <div class="scan__bar"><span data-scan-bar></span></div>
+            <div class="scan__stats">
+              <span><i class="sw sw--current"></i> Current exFAT</span>
+              <span><i class="sw sw--old"></i> Earlier FAT32 <b data-count="old">0</b></span>
+              <span><i class="sw sw--photo"></i> Photos <b data-count="photo">0</b></span>
+              <span><i class="sw sw--video"></i> Videos <b data-count="video">0</b></span>
+            </div>
+            <div class="diag" data-diag>
+              <div class="diag__bubble"><span class="diag__icon">💡</span><p data-typed></p></div>
+              <ul class="diag__sources" data-sources>
+                <li><span>🗂️ exFAT · “RESCUE”</span><em>1 file</em></li>
+                <li class="is-hot"><span>🗂️ FAT32 · “OLDDATA”</span><em>110 recoverable</em></li>
+                <li><span>🧩 Raw files</span><em>366 recoverable</em></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- HOW IT WORKS -->
+      <section class="section" id="how">
+        <div class="container">
+          <header class="section__head reveal">
+            <p class="eyebrow">How it works</p>
+            <h2>Four calm steps from “it’s all gone” to “got it”.</h2>
+          </header>
+
+          <div class="steps" data-steps>
+            <ol class="steps__list" role="tablist" aria-label="Steps">
+              <li>
+                <button role="tab" aria-selected="true" data-step="0">
+                  <span class="steps__num">1</span>
+                  <span><b>Choose the drive</b><small>USB sticks, SD cards and external disks — or a disk image you already made.</small></span>
+                  <i class="steps__progress"></i>
+                </button>
+              </li>
+              <li>
+                <button role="tab" aria-selected="false" data-step="1">
+                  <span class="steps__num">2</span>
+                  <span><b>Make a safe copy</b><small>FindIt clones the drive to a file first, so a failing drive can’t get worse.</small></span>
+                  <i class="steps__progress"></i>
+                </button>
+              </li>
+              <li>
+                <button role="tab" aria-selected="false" data-step="2">
+                  <span class="steps__num">3</span>
+                  <span><b>Scan</b><small>Pick what to look for — or just leave everything on. It diagnoses as it goes.</small></span>
+                  <i class="steps__progress"></i>
+                </button>
+              </li>
+              <li>
+                <button role="tab" aria-selected="false" data-step="3">
+                  <span class="steps__num">4</span>
+                  <span><b>Preview &amp; recover</b><small>Browse like Finder, see thumbnails, and save what you want to another drive.</small></span>
+                  <i class="steps__progress"></i>
+                </button>
+              </li>
+            </ol>
+            <div class="steps__stage window">
+              <span class="window__lights" aria-hidden="true"><i></i><i></i><i></i></span>
+              <img class="is-active" src="assets/shot-choose.webp" width="2300" height="1520" alt="Choosing a USB drive in FindIt" loading="lazy" />
+              <img src="assets/shot-clone.webp" width="2300" height="1520" alt="Making a safe copy of the drive, 59% done" loading="lazy" />
+              <img src="assets/shot-scan-options.webp" width="2300" height="1520" alt="Choosing filesystems and file types to scan for" loading="lazy" />
+              <img src="assets/shot-results.webp" width="2300" height="1520" alt="Browsing recovered photos and selecting files to recover" loading="lazy" />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- FEATURES -->
+      <section class="section section--tint" id="features">
+        <div class="container">
+          <header class="section__head reveal">
+            <p class="eyebrow">Features</p>
+            <h2>Professional recovery, made friendly.</h2>
+            <p class="muted">Built on The Sleuth Kit, the engine forensic investigators trust — with a guided, honest interface on top.</p>
+          </header>
+
+          <div class="bento">
+            <article class="tile tile--wide reveal">
+              <div>
+                <h3>Finds the filesystem that used to be there</h3>
+                <p>
+                  Reformatted from NTFS to exFAT? FindIt spots the earlier filesystem underneath and rebuilds its
+                  folders, so you get your files back <em>with their original names and folders</em>.
+                </p>
+              </div>
+              <div class="layers" aria-hidden="true">
+                <div class="layer layer--now"><span>exFAT · today</span><em>empty</em></div>
+                <div class="layer layer--old"><span>FAT32 · before</span><em>DCIM · Wedding · Documents</em></div>
+                <div class="layer layer--raw"><span>Raw content</span><em>412 photos · 23 videos</em></div>
+              </div>
+            </article>
+
+            <article class="tile reveal" style="--d: 60ms">
+              <h3>Recovers by content</h3>
+              <p>When there’s no filesystem left, FindIt recognizes files by what’s inside them — and checks each one actually opens.</p>
+              <div class="chips" aria-label="Supported file types">
+                <span>JPEG</span><span>PNG</span><span>MP4</span><span>PDF</span><span>ZIP · Office</span>
+              </div>
+            </article>
+
+            <article class="tile reveal" style="--d: 120ms">
+              <h3>See it before you save it</h3>
+              <p>Thumbnails for photos and videos, so you know exactly what you’re getting back.</p>
+              <div class="thumbs" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+            </article>
+
+            <article class="tile reveal" style="--d: 60ms">
+              <div class="tile__icon" style="--tint: #ecfdf5" aria-hidden="true">🏷️</div>
+              <h3>Honest about every file</h3>
+              <p>No false promises. Each file tells you how recoverable it really is.</p>
+              <div class="status" aria-label="File status examples">
+                <span class="st st--good">Recoverable</span>
+                <span class="st st--warn">Partial</span>
+                <span class="st st--warn">Name only</span>
+                <span class="st st--warn">Fragment</span>
+              </div>
+            </article>
+
+            <article class="tile reveal" style="--d: 120ms">
+              <div class="tile__icon" style="--tint: #eff6ff" aria-hidden="true">📁</div>
+              <h3>Feels like Finder</h3>
+              <p>Folder tree, icons, list and details views, back and forward — nothing new to learn.</p>
+            </article>
+
+            <article class="tile reveal" style="--d: 180ms">
+              <div class="tile__icon" style="--tint: #fffbeb" aria-hidden="true">🩹</div>
+              <h3>Copes with failing drives</h3>
+              <p>Unreadable areas are skipped instead of stopping the scan, and FindIt tells you how much couldn’t be read.</p>
+            </article>
+
+            <article class="tile reveal" style="--d: 60ms">
+              <div class="tile__icon" style="--tint: #f5f3ff" aria-hidden="true">🛡️</div>
+              <h3>Never overwrites anything</h3>
+              <p>It won’t save onto the drive you’re recovering from, and files with the same name are kept side by side.</p>
+            </article>
+
+            <article class="tile reveal" style="--d: 120ms">
+              <div class="tile__icon" style="--tint: #fef2f2" aria-hidden="true">⚡</div>
+              <h3>Fast on big drives</h3>
+              <p>One streaming pass over the drive, and results with 100,000+ files still scroll smoothly.</p>
+            </article>
+
+            <article class="tile reveal" style="--d: 180ms">
+              <div class="tile__icon" style="--tint: #f1f5f9" aria-hidden="true">🔒</div>
+              <h3>Private by design</h3>
+              <p>No account, no tracking, no uploads. FindIt never connects to the internet.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- GALLERY -->
+      <section class="section" id="gallery">
+        <div class="container">
+          <header class="section__head reveal">
+            <p class="eyebrow">A closer look</p>
+            <h2>Everything it found, laid out clearly.</h2>
+          </header>
+          <div class="gallery reveal" data-gallery>
+            <div class="seg" role="tablist" aria-label="Screenshots">
+              <button role="tab" aria-selected="true" data-shot="0">Photos</button>
+              <button role="tab" aria-selected="false" data-shot="1">Details &amp; preview</button>
+              <button role="tab" aria-selected="false" data-shot="2">Found by content</button>
+            </div>
+            <div class="window gallery__stage">
+              <span class="window__lights" aria-hidden="true"><i></i><i></i><i></i></span>
+              <img class="is-active" src="assets/shot-results.webp" width="2300" height="1520" alt="Icon view of recovered photos with thumbnails" loading="lazy" />
+              <img src="assets/shot-details.webp" width="2300" height="1520" alt="Details view with a preview of the selected photo" loading="lazy" />
+              <img src="assets/shot-raw.webp" width="2300" height="1520" alt="Photos found by content after the filesystem was lost" loading="lazy" />
+            </div>
+            <p class="gallery__caption" data-caption>Browse the old folders exactly as they were, with a thumbnail for every photo.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- SAFETY -->
+      <section class="section section--dark" id="safety">
+        <div class="container">
+          <header class="section__head reveal">
+            <p class="eyebrow eyebrow--light">Safe by design</p>
+            <h2>The first rule of recovery: don’t make it worse.</h2>
+          </header>
+          <div class="cards cards--4">
+            <article class="card card--dark reveal">
+              <div class="card__icon">📖</div>
+              <h3>Read-only, always</h3>
+              <p>Your drive is only ever read. There is no code path that writes to it.</p>
+            </article>
+            <article class="card card--dark reveal" style="--d: 80ms">
+              <div class="card__icon">🛟</div>
+              <h3>Copy first</h3>
+              <p>Clone the drive to a file and work from the copy — the safest way to handle a failing disk.</p>
+            </article>
+            <article class="card card--dark reveal" style="--d: 160ms">
+              <div class="card__icon">🔐</div>
+              <h3>Least privilege</h3>
+              <p>macOS asks for your password once. Only two tiny helpers use it; the app itself never runs as administrator.</p>
+            </article>
+            <article class="card card--dark reveal" style="--d: 240ms">
+              <div class="card__icon">🔍</div>
+              <h3>Open to inspect</h3>
+              <p>Every line of code is public under the Apache-2.0 license. No telemetry, no network access.</p>
+            </article>
+          </div>
+
+          <div class="stats reveal">
+            <div><b data-counter="0">0</b><span>bytes written to your drive</span></div>
+            <div><b data-counter="3">0</b><span>filesystems understood</span></div>
+            <div><b data-counter="100" data-suffix="%">0</b><span>offline</span></div>
+            <div><b data-counter="0" data-prefix="$">0</b><span>forever</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- COMPARISON -->
+      <section class="section" id="compare">
+        <div class="container narrow">
+          <header class="section__head reveal">
+            <p class="eyebrow">Why FindIt</p>
+            <h2>The power of pro tools, without the manual.</h2>
+            <p class="muted">Forensic recovery suites are brilliant — and built for experts. FindIt is built for everyone else.</p>
+          </header>
+          <div class="compare reveal">
+            <div class="compare__row compare__row--head">
+              <span></span><span class="compare__us">FindIt</span><span>Typical pro tools</span>
+            </div>
+            <div class="compare__row"><span>Explains what happened in plain English</span><span class="yes">✓</span><span class="no">—</span></div>
+            <div class="compare__row"><span>Guided, step-by-step</span><span class="yes">✓</span><span class="no">—</span></div>
+            <div class="compare__row"><span>Previews before recovering</span><span class="yes">✓</span><span class="some">Sometimes</span></div>
+            <div class="compare__row"><span>Protects the source drive by default</span><span class="yes">✓</span><span class="some">Manual</span></div>
+            <div class="compare__row"><span>Honest per-file recoverability</span><span class="yes">✓</span><span class="some">Varies</span></div>
+            <div class="compare__row"><span>Free and open source</span><span class="yes">✓</span><span class="some">Often paid</span></div>
+            <div class="compare__row"><span>Time to first recovered file</span><span class="yes">Minutes</span><span class="some">Hours of reading</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- DOWNLOAD -->
+      <section class="section section--tint" id="download">
+        <div class="container">
+          <div class="cta reveal">
+            <img src="assets/icon.png" width="96" height="96" alt="" class="cta__icon" />
+            <h2>Get your files back today.</h2>
+            <p class="muted">Free, open source, and ready in under a minute.</p>
+            <a class="btn btn--primary btn--lg" href="https://github.com/manju4682/findit/releases/latest" rel="noopener">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Download FindIt<span data-version-suffix></span>
+            </a>
+            <p class="hero__meta" data-release-meta>macOS 12 or later · Apple Silicon (M1 and newer)</p>
+
+            <ol class="install">
+              <li><b>Download</b> <span>Get <code>FindIt.dmg</code> from the latest release.</span></li>
+              <li><b>Install</b> <span>Open it and drag FindIt into Applications.</span></li>
+              <li>
+                <b>First launch</b>
+                <span>macOS will say it can’t verify the app. Open <em>System Settings → Privacy &amp; Security</em>, scroll down and click <em>Open Anyway</em>. You only do this once.</span>
+              </li>
+            </ol>
+            <p class="tip">💡 Stop using the affected drive until you’ve recovered your files — anything new written to it can overwrite them.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- FAQ -->
+      <section class="section" id="faq">
+        <div class="container narrow">
+          <header class="section__head reveal">
+            <p class="eyebrow">FAQ</p>
+            <h2>Questions, answered.</h2>
+          </header>
+          <div class="faq reveal">
+            <details>
+              <summary>Is FindIt really free?</summary>
+              <p>Yes. It’s open source under the Apache-2.0 license — no trial, no paywall for the “Recover” button, no account.</p>
+            </details>
+            <details>
+              <summary>Will it change anything on my drive?</summary>
+              <p>No. FindIt only ever reads the drive. It also refuses to save recovered files — or a copy of the drive — onto the drive you’re recovering from, because that could overwrite the very files you want back.</p>
+            </details>
+            <details>
+              <summary>Why does it ask for my password?</summary>
+              <p>macOS only lets administrators read a whole drive directly. FindIt asks once, through the standard macOS prompt, and gives that access only to two small helper programs that copy or read the drive. The app itself never runs as administrator.</p>
+            </details>
+            <details>
+              <summary>Should I clone the drive or scan it directly?</summary>
+              <p>Cloning is recommended: it makes a complete copy on another drive and everything else happens on the copy, so a failing drive is read just once. Scanning directly is quicker to start and uses no extra space, but keeps nothing for next time.</p>
+            </details>
+            <details>
+              <summary>What kinds of drives and files does it support?</summary>
+              <p>USB sticks, SD and camera cards, and external hard drives or SSDs formatted as NTFS, exFAT or FAT32 — including drives with several partitions. Files from those filesystems keep their names and folders; when the filesystem is gone, FindIt can still recover JPEG, PNG, MP4, PDF and ZIP-based files (including Word and Excel) by their content.</p>
+            </details>
+            <details>
+              <summary>Some files say “Name only”. What does that mean?</summary>
+              <p>FindIt found the file’s name and details, but its contents are no longer where the filesystem says they were — usually because they were deleted and partly reused. Check the “Raw files” source: the same photo often turns up there, recovered by its content.</p>
+            </details>
+            <details>
+              <summary>Can I recover files from my Mac’s internal disk?</summary>
+              <p>FindIt is designed for external drives and will warn you if you pick an internal one. Recovering from the disk your Mac is running from is risky, because macOS keeps writing to it.</p>
+            </details>
+            <details>
+              <summary>Does it work on Intel Macs or Windows?</summary>
+              <p>Not yet — FindIt currently runs on Apple Silicon Macs with macOS 12 or later. Intel and Windows versions are on the roadmap.</p>
+            </details>
+            <details>
+              <summary>Why does macOS say it can’t verify the developer?</summary>
+              <p>Releases aren’t notarized by Apple yet, which requires a paid developer account. The app is fully open source, and you can build it yourself from the repository. Allow it once under System Settings → Privacy &amp; Security → Open Anyway.</p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <!-- OPEN SOURCE -->
+      <section class="section section--tint">
+        <div class="container oss reveal">
+          <div>
+            <p class="eyebrow">Open source</p>
+            <h2>Built in the open.</h2>
+            <p class="muted">
+              FindIt is written in Go and Vue, and stands on the shoulders of The Sleuth Kit. Bug reports, ideas and pull
+              requests are welcome.
+            </p>
+          </div>
+          <div class="oss__actions">
+            <a class="btn btn--dark btn--lg" href="https://github.com/manju4682/findit" rel="noopener">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.39-5.27 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+              Star on GitHub
+            </a>
+            <a class="btn btn--ghost btn--lg" href="https://github.com/manju4682/findit/blob/main/CONTRIBUTING.md" rel="noopener">Contribute</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer__inner">
+        <div class="brand">
+          <img src="assets/icon.png" alt="" width="28" height="28" />
+          <span>FindIt</span>
+        </div>
+        <nav aria-label="Footer">
+          <a href="https://github.com/manju4682/findit/releases" rel="noopener">Releases</a>
+          <a href="https://github.com/manju4682/findit/blob/main/SECURITY.md" rel="noopener">Security</a>
+          <a href="https://github.com/manju4682/findit/blob/main/THIRD_PARTY_NOTICES.md" rel="noopener">Credits</a>
+          <a href="https://github.com/manju4682/findit/blob/main/LICENSE" rel="noopener">License</a>
+        </nav>
+        <p class="muted small">Made for everyone who’s ever lost a photo. Apache-2.0.</p>
+      </div>
+    </footer>
+  </body>
+</html>

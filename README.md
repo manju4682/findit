@@ -2,6 +2,7 @@
   <img src="frontend/src/assets/appicon.png" width="120" alt="FindIt" />
   <h1>FindIt</h1>
   <p><b>Recover your files — a friendly layer over proven recovery engines.</b></p>
+  <p><a href="https://manju4682.github.io/findit/">Website</a> · <a href="../../releases/latest">Download</a></p>
 </div>
 
 FindIt helps ordinary people get their files back from a USB stick or SD card that

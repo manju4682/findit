@@ -271,9 +271,9 @@ func narrate(d *model.Diagnosis) string {
 
 	switch {
 	case len(d.Present) > 0:
-		fmt.Fprintf(&b, "This drive has a %s filesystem. ", d.Present[0].Type)
+		fmt.Fprintf(&b, "This drive has %s %s filesystem. ", article(d.Present[0].Type), d.Present[0].Type)
 	case d.Current.Type != model.FSUnknown:
-		fmt.Fprintf(&b, "This drive has a %s filesystem. ", d.Current.Type)
+		fmt.Fprintf(&b, "This drive has %s %s filesystem. ", article(d.Current.Type), d.Current.Type)
 	default:
 		b.WriteString("This drive's filesystem couldn't be read directly. ")
 	}
@@ -290,4 +290,13 @@ func narrate(d *model.Diagnosis) string {
 		fmt.Fprintf(&b, "We can also see about %d photo(s) and %d video(s) by content.", photos, videos)
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// article picks "a" or "an" by how the name is spoken ("an exFAT", "an NTFS", "a FAT32").
+func article(t model.FSType) string {
+	switch t {
+	case model.FSExFAT, model.FSNTFS:
+		return "an"
+	}
+	return "a"
 }

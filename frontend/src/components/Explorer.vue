@@ -78,6 +78,8 @@ function onScroll() {
 const cols = computed(() =>
   store.viewMode === 'grid' ? Math.max(1, Math.floor((view.width + GAP) / (TILE_MIN + GAP))) : 1,
 )
+// Narrow details pane (e.g. with the preview open): drop the Type column so names stay readable.
+const compact = computed(() => view.width > 0 && view.width < 560)
 const win = computed(() => {
   const rowH = ROW_H[store.viewMode] || ROW_H.list
   const rows = Math.ceil(files.value.length / cols.value)
@@ -394,21 +396,21 @@ const resizePreview = (d) => (previewWidth.value = clamp(previewWidth.value - d,
             <tr>
               <th class="w-8"></th>
               <th class="text-left py-1.5">Name</th>
-              <th class="text-left w-20">Type</th>
-              <th class="text-right w-24">Size</th>
-              <th class="text-left pl-3 w-32">Status</th>
+              <th v-if="!compact" class="text-left w-20">Type</th>
+              <th class="text-right" :class="compact ? 'w-20' : 'w-24'">Size</th>
+              <th class="text-left pl-3" :class="compact ? 'w-28' : 'w-32'">Status</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="(f, i) in folders" :key="'d' + i" class="h-8 hover:bg-slate-100 cursor-pointer" @click="openFolder(f)">
               <td></td>
               <td class="truncate">📁 {{ folderLabel(f.name) }}</td>
-              <td class="text-slate-400">Folder</td>
+              <td v-if="!compact" class="text-slate-400">Folder</td>
               <td></td>
               <td></td>
             </tr>
             <tr ref="filesEl" aria-hidden="true">
-              <td colspan="5" class="p-0" :style="{ height: win.padTop + 'px' }"></td>
+              <td :colspan="compact ? 4 : 5" class="p-0" :style="{ height: win.padTop + 'px' }"></td>
             </tr>
             <tr
               v-for="f in win.files"
@@ -421,7 +423,7 @@ const resizePreview = (d) => (previewWidth.value = clamp(previewWidth.value - d,
                 <input type="checkbox" :checked="isSelected(f.id)" :disabled="!f.recoverable" @click.stop @change="toggleFile(f.id)" />
               </td>
               <td class="truncate" :class="f.deleted ? 'text-slate-400 line-through' : ''" :title="f.name">{{ iconFor(f.ext) }} {{ f.name }}</td>
-              <td class="text-slate-400 uppercase text-xs truncate">{{ f.ext || '—' }}</td>
+              <td v-if="!compact" class="text-slate-400 uppercase text-xs truncate">{{ f.ext || '—' }}</td>
               <td class="text-right text-slate-500">{{ fmtSize(f.size) }}</td>
               <td class="pl-3">
                 <Hint :text="statusInfo(f.assessment?.status).tip">
@@ -433,7 +435,7 @@ const resizePreview = (d) => (previewWidth.value = clamp(previewWidth.value - d,
               </td>
             </tr>
             <tr aria-hidden="true">
-              <td colspan="5" class="p-0" :style="{ height: win.padBottom + 'px' }"></td>
+              <td :colspan="compact ? 4 : 5" class="p-0" :style="{ height: win.padBottom + 'px' }"></td>
             </tr>
           </tbody>
         </table>
